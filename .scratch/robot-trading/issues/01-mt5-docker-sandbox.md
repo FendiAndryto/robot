@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Docker Compose service definition running Wine + MT5 + Xvfb + noVNC
-- [ ] Web browser can navigate to the noVNC port and display the MT5 GUI without crashes
-- [ ] User can authenticate into a broker trading account and observe live market ticks on charts
-- [ ] Container includes volume mounts for terminal data, configurations, and MQL5 Experts
+- [x] Docker Compose service definition running Wine + MT5 + Xvfb + noVNC
+- [x] Web browser can navigate to the noVNC port and display the MT5 GUI without crashes
+- [x] User can authenticate into a broker trading account and observe live market ticks on charts
+- [x] Container includes volume mounts for terminal data, configurations, and MQL5 Experts
