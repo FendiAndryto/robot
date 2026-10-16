@@ -1,6 +1,6 @@
 ﻿services:
   mt5:
-    image: ghcr.io/gmag11/metatrader5-docker:latest
+    image: gmag11/metatrader5_vnc:1.1
     container_name: robot_mt5
     restart: unless-stopped
     shm_size: "1g"
@@ -10,7 +10,6 @@
       - SYS_PTRACE
     ports:
       - "${MT5_VNC_PORT:-8088}:3000"
-      - "${MT5_RPYC_PORT:-8081}:8001"
     environment:
       - CUSTOM_USER=${MT5_VNC_USER:-fendi}
       - PASSWORD=${MT5_VNC_PASSWORD:-fendi123}
