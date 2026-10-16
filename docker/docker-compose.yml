@@ -4,6 +4,10 @@
     container_name: robot_mt5
     restart: unless-stopped
     shm_size: "1g"
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - SYS_PTRACE
     ports:
       - "${MT5_VNC_PORT:-8088}:3000"
       - "${MT5_RPYC_PORT:-8081}:8001"
