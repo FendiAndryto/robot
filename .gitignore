@@ -1,0 +1,50 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+.vite/
+
+# Env & Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# MT5 & Wine
+*.ex5
+*.log
+terminal_data/
+wine_prefix/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
