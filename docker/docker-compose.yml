@@ -16,6 +16,21 @@ services:
     networks:
       - robot_net
 
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: robot_backend
+    restart: unless-stopped
+    ports:
+      - "${BRIDGE_API_PORT:-8089}:8000"
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-default_secret_key_12345}
+      - MT5_MAGIC_NUMBER=${MT5_MAGIC_NUMBER:-778899}
+      - ALLOWED_HOSTS=*
+    networks:
+      - robot_net
+
 networks:
   robot_net:
     name: robot_network
