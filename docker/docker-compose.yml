@@ -1,13 +1,11 @@
-﻿services:
+services:
   mt5:
-    image: gmag11/metatrader5_vnc:1.1
+    image: robot-mt5:custom
     container_name: robot_mt5
     restart: unless-stopped
     shm_size: "1g"
     security_opt:
       - seccomp:unconfined
-    cap_add:
-      - SYS_PTRACE
     ports:
       - "${MT5_VNC_PORT:-8088}:3000"
     environment:

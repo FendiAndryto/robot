@@ -1,0 +1,6 @@
+FROM ghcr.io/gmag11/metatrader5-docker:latest
+
+# Install WineHQ Staging to fix Themida anti-debugger bug (WineHQ Bug 58043/57950)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends winehq-staging xdotool && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
