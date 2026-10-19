@@ -230,5 +230,46 @@ export const api = {
       throw new Error('Failed to retrieve strategy configuration');
     }
     return res.json();
+  },
+
+  // Autonomous Auto-Pilot & Drawdown Guard
+  async getAutoPilotStatus() {
+    const res = await fetch(`${API_BASE}/api/v1/autopilot/status`, {
+      method: 'GET',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) {
+      throw new Error('Failed to fetch Auto-Pilot status');
+    }
+    return res.json();
+  },
+
+  async toggleAutoPilot(enabled, reason = 'Manual toggle by trader') {
+    const res = await fetch(`${API_BASE}/api/v1/autopilot/toggle`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ enabled, reason })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to toggle Auto-Pilot' }));
+      throw new Error(err.detail || 'Auto-Pilot state change failed');
+    }
+    return res.json();
+  },
+
+  async resetDrawdownGuard(startingEquity = null, reason = 'Manual drawdown lockout override by trader') {
+    const res = await fetch(`${API_BASE}/api/v1/autopilot/reset-drawdown`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        ...(startingEquity !== null && startingEquity !== undefined ? { starting_equity: Number(startingEquity) } : {}),
+        reason
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to reset Drawdown Guard' }));
+      throw new Error(err.detail || 'Drawdown Guard reset failed');
+    }
+    return res.json();
   }
 };

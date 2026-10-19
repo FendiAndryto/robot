@@ -195,6 +195,16 @@ class StrategyEngine:
         with self._lock:
             self._signals[signal_id] = signal
 
+        # Autonomous Auto-Pilot Execution Hook
+        from app.services.autopilot_service import autopilot_service
+        if autopilot_service.is_autopilot_active() and not autopilot_service.is_drawdown_locked():
+            try:
+                self.approve_signal(signal_id)
+                autopilot_service.increment_auto_executed_count()
+                signal.reason += " [AUTOPILOT AUTO-EXECUTED]"
+            except Exception:
+                pass
+
         return signal
 
     def create_custom_signal(
@@ -281,6 +291,16 @@ class StrategyEngine:
 
         with self._lock:
             self._signals[signal_id] = signal
+
+        # Autonomous Auto-Pilot Execution Hook
+        from app.services.autopilot_service import autopilot_service
+        if autopilot_service.is_autopilot_active() and not autopilot_service.is_drawdown_locked():
+            try:
+                self.approve_signal(signal_id)
+                autopilot_service.increment_auto_executed_count()
+                signal.reason += " [AUTOPILOT AUTO-EXECUTED]"
+            except Exception:
+                pass
 
         return signal
 

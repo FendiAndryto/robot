@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     STRATEGY_DEFAULT_RR_RATIO: float = 2.0
     STRATEGY_SIGNAL_TTL_SECONDS: int = 300
     STRATEGY_MONITORED_SYMBOLS: str = "EURUSD,GBPUSD,USDJPY,XAUUSD"
+
+    # Auto-Pilot Mode & Drawdown Guard
+    AUTOPILOT_DEFAULT_ENABLED: bool = False
+    AUTOPILOT_MAX_DAILY_TRADES: int = 20
+    AUTOPILOT_RESET_HOUR_UTC: int = 0
     
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

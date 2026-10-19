@@ -9,7 +9,10 @@ export default function Navbar({
   username,
   onLogout,
   onTriggerKillSwitch,
-  isKillSwitchActive = false
+  isKillSwitchActive = false,
+  isAutoPilotActive = false,
+  isDrawdownLocked = false,
+  onToggleAutoPilot = () => {}
 }) {
   return (
     <header className="navbar" id="main-navbar">
@@ -52,6 +55,56 @@ export default function Navbar({
             <option value={2000}>Refresh: 2s</option>
             <option value={5000}>Refresh: 5s</option>
           </select>
+        </div>
+
+        {/* Master Auto-Pilot Switch */}
+        <div className="autopilot-nav-wrapper">
+          <button
+            type="button"
+            className={`btn-autopilot-toggle ${
+              isDrawdownLocked
+                ? 'locked'
+                : isKillSwitchActive
+                ? 'disabled'
+                : isAutoPilotActive
+                ? 'active'
+                : 'manual'
+            }`}
+            id="navbar-autopilot-toggle-btn"
+            onClick={() => {
+              if (!isDrawdownLocked && !isKillSwitchActive) {
+                onToggleAutoPilot(!isAutoPilotActive);
+              }
+            }}
+            disabled={isDrawdownLocked || isKillSwitchActive}
+            title={
+              isDrawdownLocked
+                ? 'Auto-Pilot locked out: Daily Drawdown limit exceeded'
+                : isKillSwitchActive
+                ? 'Auto-Pilot disabled: Kill switch active'
+                : isAutoPilotActive
+                ? 'Auto-Pilot is ACTIVE: Signals execute automatically without manual confirmation'
+                : 'Manual Mode: Signals require manual trader approval before execution'
+            }
+          >
+            {isDrawdownLocked ? (
+              <>
+                <Lock size={14} className="text-rose" />
+                <span>DD LOCKED</span>
+              </>
+            ) : isAutoPilotActive ? (
+              <>
+                <span className="autopilot-pulse-indicator" />
+                <Bot size={15} />
+                <span>AUTOPILOT ON</span>
+              </>
+            ) : (
+              <>
+                <Bot size={15} style={{ opacity: 0.6 }} />
+                <span>MANUAL CONFIRM</span>
+              </>
+            )}
+          </button>
         </div>
 
         {/* Emergency Kill Switch Button */}

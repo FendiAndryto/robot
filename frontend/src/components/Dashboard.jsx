@@ -20,6 +20,8 @@ import PositionsTable from './PositionsTable';
 import KillSwitchModal from './KillSwitchModal';
 import RiskBanner from './RiskBanner';
 import SignalsPanel from './SignalsPanel';
+import DrawdownGuardCard from './DrawdownGuardCard';
+import DrawdownBanner from './DrawdownBanner';
 import { api } from '../services/api';
 
 const formatCurrency = (val, currency = 'USD') => {
@@ -37,6 +39,8 @@ export default function Dashboard({ user, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [pollInterval, setPollInterval] = useState(1000);
   const [signals, setSignals] = useState([]);
+  const [autopilotStatus, setAutopilotStatus] = useState(null);
+  const [isResettingDrawdown, setIsResettingDrawdown] = useState(false);
   const [isKillSwitchModalOpen, setIsKillSwitchModalOpen] = useState(false);
   const [isUnlockingEngine, setIsUnlockingEngine] = useState(false);
   const timerRef = useRef(null);
@@ -50,11 +54,19 @@ export default function Dashboard({ user, onLogout }) {
     }
   };
 
+  const fetchAutoPilotStatus = async () => {
+    try {
+      const data = await api.getAutoPilotStatus();
+      setAutopilotStatus(data);
+    } catch {
+      // Ignore transient network errors during polling
+    }
+  };
+
   const fetchStatus = async () => {
     try {
       const data = await api.getBridgeStatus();
       setBridgeStatus(data);
-      setLastFetchTime(Date.now());
     } catch (err) {
       // In case backend is unreachable or returns error
       setBridgeStatus((prev) => ({
@@ -71,9 +83,11 @@ export default function Dashboard({ user, onLogout }) {
   useEffect(() => {
     fetchStatus();
     fetchSignals();
+    fetchAutoPilotStatus();
     timerRef.current = setInterval(() => {
       fetchStatus();
       fetchSignals();
+      fetchAutoPilotStatus();
     }, pollInterval);
 
     return () => {
@@ -84,6 +98,7 @@ export default function Dashboard({ user, onLogout }) {
   const handleTriggerKillSwitch = async (reason) => {
     await api.triggerKillSwitch(reason);
     await fetchStatus();
+    await fetchAutoPilotStatus();
   };
 
   const handleUnlockEngine = async () => {
@@ -91,8 +106,31 @@ export default function Dashboard({ user, onLogout }) {
     try {
       await api.disarmKillSwitch();
       await fetchStatus();
+      await fetchAutoPilotStatus();
     } finally {
       setIsUnlockingEngine(false);
+    }
+  };
+
+  const handleToggleAutoPilot = async (enabled) => {
+    try {
+      await api.toggleAutoPilot(enabled);
+      await fetchAutoPilotStatus();
+    } catch (err) {
+      console.error('Failed to toggle AutoPilot:', err);
+    }
+  };
+
+  const handleResetDrawdown = async (newBaseline) => {
+    setIsResettingDrawdown(true);
+    try {
+      await api.resetDrawdownGuard(newBaseline);
+      await fetchAutoPilotStatus();
+      await fetchStatus();
+    } catch (err) {
+      console.error('Failed to reset Drawdown Guard:', err);
+    } finally {
+      setIsResettingDrawdown(false);
     }
   };
 
@@ -144,6 +182,9 @@ export default function Dashboard({ user, onLogout }) {
         onLogout={onLogout}
         onTriggerKillSwitch={() => setIsKillSwitchModalOpen(true)}
         isKillSwitchActive={isKillSwitchActive}
+        isAutoPilotActive={autopilotStatus?.is_autopilot_active ?? false}
+        isDrawdownLocked={autopilotStatus?.is_drawdown_lockout_active ?? false}
+        onToggleAutoPilot={handleToggleAutoPilot}
       />
 
       <main className="dashboard-content animate-fade-in">
@@ -154,6 +195,16 @@ export default function Dashboard({ user, onLogout }) {
             triggeredAt={killSwitchTime}
             onUnlock={handleUnlockEngine}
             isUnlocking={isUnlockingEngine}
+          />
+        )}
+
+        {/* Daily Drawdown Lockout Banner */}
+        {autopilotStatus?.is_drawdown_lockout_active && (
+          <DrawdownBanner
+            reason={autopilotStatus.drawdown_lockout_reason}
+            lockoutTime={autopilotStatus.lockout_time}
+            onResetGuard={handleResetDrawdown}
+            isResetting={isResettingDrawdown}
           />
         )}
 
@@ -210,6 +261,12 @@ export default function Dashboard({ user, onLogout }) {
             </button>
           </div>
         </div>
+
+        {/* Daily Drawdown Guard Progress & AutoPilot Telemetry Card */}
+        <DrawdownGuardCard
+          autopilotStatus={autopilotStatus}
+          currency={currency}
+        />
 
         {/* Metric Cards Grid */}
         <div className="metrics-grid" id="metrics-cards-grid">
@@ -285,9 +342,11 @@ export default function Dashboard({ user, onLogout }) {
           signals={signals}
           onRefreshSignals={fetchSignals}
           isKillSwitchActive={isKillSwitchActive}
+          isAutoPilotActive={autopilotStatus?.is_autopilot_active ?? false}
           onOrderExecuted={() => {
             fetchStatus();
             fetchSignals();
+            fetchAutoPilotStatus();
           }}
         />
 

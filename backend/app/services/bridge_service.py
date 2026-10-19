@@ -126,6 +126,14 @@ class BridgeService:
                     detail=f"Trading engine is locked by emergency Kill Switch ({self._kill_switch_reason or 'Emergency lockdown'}). Disarm Kill Switch before submitting new orders."
                 )
 
+        # Safety Check: Block new trade entries if Daily Drawdown Guard is locked
+        from app.services.autopilot_service import autopilot_service
+        if autopilot_service.is_drawdown_locked() and action in ("BUY", "SELL"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Trading engine is locked by Daily Drawdown Guard: Maximum allowable daily loss threshold exceeded."
+            )
+
         if action in ("BUY", "SELL"):
             if not order_req.symbol or not order_req.symbol.strip():
                 raise HTTPException(
