@@ -11,7 +11,8 @@ import {
   Server,
   AlertTriangle,
   RefreshCw,
-  Radio
+  Radio,
+  Monitor
 } from 'lucide-react';
 import Navbar from './Navbar';
 import MetricCard from './MetricCard';
@@ -22,6 +23,7 @@ import RiskBanner from './RiskBanner';
 import SignalsPanel from './SignalsPanel';
 import DrawdownGuardCard from './DrawdownGuardCard';
 import DrawdownBanner from './DrawdownBanner';
+import Mt5ConnectModal from './Mt5ConnectModal';
 import { api } from '../services/api';
 
 const formatCurrency = (val, currency = 'USD') => {
@@ -42,6 +44,7 @@ export default function Dashboard({ user, onLogout }) {
   const [isResettingDrawdown, setIsResettingDrawdown] = useState(false);
   const [isKillSwitchModalOpen, setIsKillSwitchModalOpen] = useState(false);
   const [isUnlockingEngine, setIsUnlockingEngine] = useState(false);
+  const [isMt5ModalOpen, setIsMt5ModalOpen] = useState(false);
   const [isTestingTelegram, setIsTestingTelegram] = useState(false);
   const [telegramStatusMsg, setTelegramStatusMsg] = useState(null);
   const timerRef = useRef(null);
@@ -201,6 +204,7 @@ export default function Dashboard({ user, onLogout }) {
         isAutoPilotActive={autopilotStatus?.is_autopilot_active ?? false}
         isDrawdownLocked={autopilotStatus?.is_drawdown_lockout_active ?? false}
         onToggleAutoPilot={handleToggleAutoPilot}
+        onOpenMt5Modal={() => setIsMt5ModalOpen(true)}
       />
 
       <main className="dashboard-content animate-fade-in">
@@ -232,6 +236,15 @@ export default function Dashboard({ user, onLogout }) {
               <strong>MT5 Bridge Disconnected:</strong> Telemetry stream is currently inactive.
               The bridge drops to disconnected status within seconds when the MT5 terminal is closed or offline.
             </div>
+            <button
+              type="button"
+              onClick={() => setIsMt5ModalOpen(true)}
+              className="btn-banner-connect-mt5"
+              id="banner-connect-mt5-btn"
+            >
+              <Monitor size={15} />
+              <span>Buka Layar MT5</span>
+            </button>
           </div>
         )}
 
@@ -266,6 +279,17 @@ export default function Dashboard({ user, onLogout }) {
                 {terminalConnected ? 'BROKER ONLINE' : 'BROKER OFFLINE'}
               </div>
             </div>
+            <button
+              type="button"
+              onClick={() => setIsMt5ModalOpen(true)}
+              className="btn-logout"
+              style={{ background: 'rgba(0,240,255,0.1)', borderColor: 'rgba(0,240,255,0.35)', color: 'var(--accent-cyan)' }}
+              id="account-banner-mt5-btn"
+              title="Buka Layar MT5 & Kelola Akun Broker"
+            >
+              <Monitor size={14} style={{ marginRight: '4px' }} />
+              <span>Layar MT5</span>
+            </button>
             <button
               onClick={fetchStatus}
               className="btn-logout"
@@ -454,6 +478,15 @@ export default function Dashboard({ user, onLogout }) {
         openPositionsCount={openPositions}
         floatingPnl={floatingPnl}
         currency={currency}
+      />
+
+      {/* MT5 Web-GUI Connect & Broker Login Modal */}
+      <Mt5ConnectModal
+        isOpen={isMt5ModalOpen}
+        onClose={() => setIsMt5ModalOpen(false)}
+        isConnected={isConnected}
+        accountNumber={accountNumber}
+        onCheckStatus={fetchStatus}
       />
     </div>
   );

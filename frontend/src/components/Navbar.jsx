@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, LogOut, Clock, AlertOctagon, Lock } from 'lucide-react';
+import { Bot, LogOut, Clock, AlertOctagon, Lock, Monitor } from 'lucide-react';
 
 export default function Navbar({
   isConnected,
@@ -12,7 +12,8 @@ export default function Navbar({
   isKillSwitchActive = false,
   isAutoPilotActive = false,
   isDrawdownLocked = false,
-  onToggleAutoPilot = () => {}
+  onToggleAutoPilot = () => {},
+  onOpenMt5Modal = () => {}
 }) {
   return (
     <header className="navbar" id="main-navbar">
@@ -31,7 +32,7 @@ export default function Navbar({
         <div
           className={`status-badge ${isConnected ? 'connected' : 'disconnected'}`}
           id="connection-status-badge"
-          title={isConnected ? 'Bridge EA actively streaming telemetry' : 'Bridge EA is offline or timed out'}
+          title={isConnected ? 'Bridge EA actively streaming telemetry' : 'Bridge EA is offline atau timed out'}
         >
           <span className={`pulse-dot ${isConnected ? 'online' : 'offline'}`} />
           <span>{isConnected ? 'CONNECTED' : 'DISCONNECTED'}</span>
@@ -41,6 +42,18 @@ export default function Navbar({
             </span>
           )}
         </div>
+
+        {/* Quick Open MT5 Web-GUI Button */}
+        <button
+          type="button"
+          onClick={onOpenMt5Modal}
+          className="btn-nav-mt5"
+          id="navbar-open-mt5-btn"
+          title="Buka Layar MT5 & Login Akun Broker"
+        >
+          <Monitor size={15} />
+          <span>{isConnected ? 'Terminal MT5' : 'Hubungkan MT5'}</span>
+        </button>
 
         {/* Polling Interval Selector */}
         <div className="poll-selector" title="Telemetry refresh frequency">
