@@ -7,6 +7,7 @@ import './App.css';
 export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sessionExpiredMsg, setSessionExpiredMsg] = useState('');
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -28,20 +29,34 @@ export default function App() {
     };
 
     checkAuth();
+
+    const handleSessionExpired = () => {
+      setUser(null);
+      setSessionExpiredMsg('Sesi login telah berakhir. Silakan masuk kembali.');
+    };
+
+    window.addEventListener('tradegear:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('tradegear:session-expired', handleSessionExpired);
   }, []);
 
-  const handleLoginSuccess = async () => {
+  const handleLoginSuccess = async (authData) => {
+    setSessionExpiredMsg('');
     try {
       const userData = await api.getMe();
       setUser(userData);
     } catch {
-      setUser({ username: 'Admin', is_authenticated: true });
+      setUser({
+        username: authData?.username || 'Trader',
+        is_authenticated: true,
+        role: 'trader'
+      });
     }
   };
 
   const handleLogout = async () => {
     await api.logout();
     setUser(null);
+    setSessionExpiredMsg('');
   };
 
   if (loading) {
@@ -67,7 +82,10 @@ export default function App() {
       {user ? (
         <Dashboard user={user} onLogout={handleLogout} />
       ) : (
-        <LoginPage onLoginSuccess={handleLoginSuccess} />
+        <LoginPage
+          onLoginSuccess={handleLoginSuccess}
+          sessionExpiredMsg={sessionExpiredMsg}
+        />
       )}
     </>
   );

@@ -2,10 +2,36 @@
 // Reads from Vite environment variable or falls back to relative path for reverse proxy
 const API_BASE = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/$/, '') : '';
 const TOKEN_KEY = 'robot_trading_jwt_token';
+const REMEMBER_KEY = 'tradegear_remember_me';
 
-export const getToken = () => localStorage.getItem(TOKEN_KEY);
-export const setToken = (token) => localStorage.setItem(TOKEN_KEY, token);
-export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+export const getToken = () => localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
+
+export const setToken = (token, remember = true) => {
+  if (remember) {
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(REMEMBER_KEY, 'true');
+    sessionStorage.removeItem(TOKEN_KEY);
+  } else {
+    sessionStorage.setItem(TOKEN_KEY, token);
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REMEMBER_KEY);
+  }
+};
+
+export const clearToken = () => {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REMEMBER_KEY);
+  sessionStorage.removeItem(TOKEN_KEY);
+};
+
+export const isRemembered = () => localStorage.getItem(REMEMBER_KEY) === 'true';
+
+const notifySessionExpired = () => {
+  clearToken();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('tradegear:session-expired'));
+  }
+};
 
 const getAuthHeaders = () => {
   const token = getToken();
@@ -15,9 +41,25 @@ const getAuthHeaders = () => {
   };
 };
 
+/**
+ * Unified authenticated fetch wrapper.
+ * Intercepts HTTP 401 across all API endpoints and notifies the app of session expiration.
+ */
+const authFetch = async (url, options = {}) => {
+  const headers = {
+    ...getAuthHeaders(),
+    ...(options.headers || {})
+  };
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    notifySessionExpired();
+  }
+  return res;
+};
+
 export const api = {
   // Authentication
-  async login(username, password) {
+  async login(username, password, remember = true) {
     const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -30,20 +72,47 @@ export const api = {
     }
     
     const data = await res.json();
-    setToken(data.access_token);
+    setToken(data.access_token, remember);
     return data;
   },
 
+  async register(username, password, role = 'trader', remember = true) {
+    const res = await fetch(`${API_BASE}/api/v1/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Registration failed' }));
+      throw new Error(err.detail || 'Registration failed');
+    }
+
+    const data = await res.json();
+    setToken(data.access_token, remember);
+    return data;
+  },
+
+  async changePassword(oldPassword, newPassword) {
+    const res = await authFetch(`${API_BASE}/api/v1/auth/change-password`, {
+      method: 'POST',
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to change password' }));
+      throw new Error(err.detail || 'Failed to change password');
+    }
+
+    return res.json();
+  },
+
   async getMe() {
-    const res = await fetch(`${API_BASE}/api/v1/auth/me`, {
-      method: 'GET',
-      headers: getAuthHeaders()
+    const res = await authFetch(`${API_BASE}/api/v1/auth/me`, {
+      method: 'GET'
     });
     
     if (!res.ok) {
-      if (res.status === 401) {
-        clearToken();
-      }
       throw new Error('Unauthorized');
     }
     
@@ -52,9 +121,8 @@ export const api = {
 
   async logout() {
     try {
-      await fetch(`${API_BASE}/api/v1/auth/logout`, {
-        method: 'POST',
-        headers: getAuthHeaders()
+      await authFetch(`${API_BASE}/api/v1/auth/logout`, {
+        method: 'POST'
       });
     } catch {
       // Ignore network errors on logout
@@ -65,9 +133,8 @@ export const api = {
 
   // Bridge Status & Telemetry
   async getBridgeStatus() {
-    const res = await fetch(`${API_BASE}/api/v1/bridge/status`, {
-      method: 'GET',
-      headers: getAuthHeaders()
+    const res = await authFetch(`${API_BASE}/api/v1/bridge/status`, {
+      method: 'GET'
     });
     
     if (!res.ok) {
@@ -79,9 +146,8 @@ export const api = {
 
   // Trade Execution
   async submitOrder(orderData) {
-    const res = await fetch(`${API_BASE}/api/v1/bridge/order`, {
+    const res = await authFetch(`${API_BASE}/api/v1/bridge/order`, {
       method: 'POST',
-      headers: getAuthHeaders(),
       body: JSON.stringify(orderData)
     });
 
@@ -94,9 +160,8 @@ export const api = {
   },
 
   async getPositions() {
-    const res = await fetch(`${API_BASE}/api/v1/bridge/positions`, {
-      method: 'GET',
-      headers: getAuthHeaders()
+    const res = await authFetch(`${API_BASE}/api/v1/bridge/positions`, {
+      method: 'GET'
     });
 
     if (!res.ok) {
@@ -121,9 +186,8 @@ export const api = {
 
   // Risk Management & Emergency Kill Switch
   async getRiskStatus() {
-    const res = await fetch(`${API_BASE}/api/v1/risk/status`, {
-      method: 'GET',
-      headers: getAuthHeaders()
+    const res = await authFetch(`${API_BASE}/api/v1/risk/status`, {
+      method: 'GET'
     });
     if (!res.ok) {
       throw new Error('Failed to retrieve risk configuration');
@@ -132,9 +196,8 @@ export const api = {
   },
 
   async calculateLot(params) {
-    const res = await fetch(`${API_BASE}/api/v1/risk/calculate-lot`, {
+    const res = await authFetch(`${API_BASE}/api/v1/risk/calculate-lot`, {
       method: 'POST',
-      headers: getAuthHeaders(),
       body: JSON.stringify(params)
     });
     if (!res.ok) {
@@ -145,9 +208,8 @@ export const api = {
   },
 
   async triggerKillSwitch(reason = 'Manual emergency kill switch triggered') {
-    const res = await fetch(`${API_BASE}/api/v1/risk/kill-switch`, {
+    const res = await authFetch(`${API_BASE}/api/v1/risk/kill-switch`, {
       method: 'POST',
-      headers: getAuthHeaders(),
       body: JSON.stringify({ reason })
     });
     if (!res.ok) {
@@ -158,9 +220,8 @@ export const api = {
   },
 
   async disarmKillSwitch() {
-    const res = await fetch(`${API_BASE}/api/v1/risk/unlock`, {
-      method: 'POST',
-      headers: getAuthHeaders()
+    const res = await authFetch(`${API_BASE}/api/v1/risk/unlock`, {
+      method: 'POST'
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Failed to disarm Kill Switch' }));
@@ -172,9 +233,8 @@ export const api = {
   // Strategy Engine & Semi-Auto Signal Approval
   async getSignals(includeAll = false) {
     const query = includeAll ? '?all=true' : '';
-    const res = await fetch(`${API_BASE}/api/v1/strategy/signals${query}`, {
-      method: 'GET',
-      headers: getAuthHeaders()
+    const res = await authFetch(`${API_BASE}/api/v1/strategy/signals${query}`, {
+      method: 'GET'
     });
     if (!res.ok) {
       throw new Error('Failed to fetch trading signals');
@@ -183,9 +243,8 @@ export const api = {
   },
 
   async approveSignal(signalId, customLot = null) {
-    const res = await fetch(`${API_BASE}/api/v1/strategy/signals/${signalId}/approve`, {
+    const res = await authFetch(`${API_BASE}/api/v1/strategy/signals/${signalId}/approve`, {
       method: 'POST',
-      headers: getAuthHeaders(),
       body: JSON.stringify(customLot ? { custom_lot: customLot } : {})
     });
     if (!res.ok) {
@@ -196,9 +255,8 @@ export const api = {
   },
 
   async dismissSignal(signalId, reason = 'Manual dismissal by user') {
-    const res = await fetch(`${API_BASE}/api/v1/strategy/signals/${signalId}/dismiss`, {
+    const res = await authFetch(`${API_BASE}/api/v1/strategy/signals/${signalId}/dismiss`, {
       method: 'POST',
-      headers: getAuthHeaders(),
       body: JSON.stringify({ reason })
     });
     if (!res.ok) {
@@ -209,9 +267,8 @@ export const api = {
   },
 
   async generateTestSignal(params = {}) {
-    const res = await fetch(`${API_BASE}/api/v1/strategy/generate-test-signal`, {
+    const res = await authFetch(`${API_BASE}/api/v1/strategy/generate-test-signal`, {
       method: 'POST',
-      headers: getAuthHeaders(),
       body: JSON.stringify(params)
     });
     if (!res.ok) {
@@ -222,9 +279,8 @@ export const api = {
   },
 
   async getStrategyConfig() {
-    const res = await fetch(`${API_BASE}/api/v1/strategy/config`, {
-      method: 'GET',
-      headers: getAuthHeaders()
+    const res = await authFetch(`${API_BASE}/api/v1/strategy/config`, {
+      method: 'GET'
     });
     if (!res.ok) {
       throw new Error('Failed to retrieve strategy configuration');
@@ -234,9 +290,8 @@ export const api = {
 
   // Autonomous Auto-Pilot & Drawdown Guard
   async getAutoPilotStatus() {
-    const res = await fetch(`${API_BASE}/api/v1/autopilot/status`, {
-      method: 'GET',
-      headers: getAuthHeaders()
+    const res = await authFetch(`${API_BASE}/api/v1/autopilot/status`, {
+      method: 'GET'
     });
     if (!res.ok) {
       throw new Error('Failed to fetch Auto-Pilot status');
@@ -245,9 +300,8 @@ export const api = {
   },
 
   async toggleAutoPilot(enabled, reason = 'Manual toggle by trader') {
-    const res = await fetch(`${API_BASE}/api/v1/autopilot/toggle`, {
+    const res = await authFetch(`${API_BASE}/api/v1/autopilot/toggle`, {
       method: 'POST',
-      headers: getAuthHeaders(),
       body: JSON.stringify({ enabled, reason })
     });
     if (!res.ok) {
@@ -258,9 +312,8 @@ export const api = {
   },
 
   async resetDrawdownGuard(startingEquity = null, reason = 'Manual drawdown lockout override by trader') {
-    const res = await fetch(`${API_BASE}/api/v1/autopilot/reset-drawdown`, {
+    const res = await authFetch(`${API_BASE}/api/v1/autopilot/reset-drawdown`, {
       method: 'POST',
-      headers: getAuthHeaders(),
       body: JSON.stringify({
         ...(startingEquity !== null && startingEquity !== undefined ? { starting_equity: Number(startingEquity) } : {}),
         reason
@@ -275,9 +328,8 @@ export const api = {
 
   // Telegram Notifications & Remote Alerts
   async getTelegramStatus() {
-    const res = await fetch(`${API_BASE}/api/v1/telegram/status`, {
-      method: 'GET',
-      headers: getAuthHeaders()
+    const res = await authFetch(`${API_BASE}/api/v1/telegram/status`, {
+      method: 'GET'
     });
     if (!res.ok) {
       throw new Error('Failed to retrieve Telegram status');
@@ -286,9 +338,8 @@ export const api = {
   },
 
   async sendTelegramTestAlert(message = null) {
-    const res = await fetch(`${API_BASE}/api/v1/telegram/test-alert`, {
+    const res = await authFetch(`${API_BASE}/api/v1/telegram/test-alert`, {
       method: 'POST',
-      headers: getAuthHeaders(),
       body: JSON.stringify(message ? { message } : {})
     });
     if (!res.ok) {
@@ -299,9 +350,8 @@ export const api = {
   },
 
   async toggleTelegram(enabled) {
-    const res = await fetch(`${API_BASE}/api/v1/telegram/toggle`, {
+    const res = await authFetch(`${API_BASE}/api/v1/telegram/toggle`, {
       method: 'POST',
-      headers: getAuthHeaders(),
       body: JSON.stringify({ enabled })
     });
     if (!res.ok) {
@@ -311,4 +361,3 @@ export const api = {
     return res.json();
   }
 };
-

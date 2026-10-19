@@ -37,6 +37,9 @@ dist/
 .env.local
 *.pem
 *.key
+backend/app/data/
+backend/data/
+users.json
 
 # MT5 & Wine
 *.ex5

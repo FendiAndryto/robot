@@ -36,7 +36,7 @@
       MT5_VNC_USER={{ robot_mt5_vnc_user | default('fendi') }}
       MT5_VNC_PASSWORD={{ robot_mt5_vnc_pass | default('fendi123') }}
       BRIDGE_API_PORT={{ robot_backend_port | default('8089') }}
-      FRONTEND_PORT={{ robot_frontend_port | default('3000') }}
+      FRONTEND_PORT={{ robot_frontend_port | default('3010') }}
       SECRET_KEY={{ robot_secret_key | default('change-me-to-a-secure-random-32-byte-hex') }}
       ADMIN_USERNAME={{ robot_admin_username | default('admin') }}
       ADMIN_PASSWORD={{ robot_admin_password | default('change_this_password') }}
@@ -57,3 +57,55 @@
     project_src: /home/fendi/my-apps/robot-app/docker
     state: present
     build: "{{ 'always' if (status_git_robot.changed or status_env_robot.changed or status_clean_robot.changed) else 'policy' }}"
+
+- name: "Pasang Konfigurasi Reverse Proxy Nginx untuk TradeGear"
+  ansible.builtin.copy:
+    dest: /home/fendi/proxy-stack/data/nginx/proxy_host/trade-gear.conf
+    content: |
+      # ------------------------------------------------------------
+      # TradeGear Web Dashboard (Staging / Production)
+      # ------------------------------------------------------------
+
+      map $scheme $hsts_header {
+          https   "max-age=63072000; preload";
+      }
+
+      server {
+        set $forward_scheme http;
+        set $server         "100.68.87.58";
+        set $port           {{ robot_frontend_port | default('3010') }};
+
+        listen 80;
+        listen [::]:80;
+
+        server_name {{ robot_domain | default('staging-trade-gear.homever.my.id') }};
+        http2 off;
+
+        # Block Exploits
+        include conf.d/include/block-exploits.conf;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $http_connection;
+        proxy_http_version 1.1;
+
+        access_log /data/logs/proxy-host-trade-gear_access.log proxy;
+        error_log /data/logs/proxy-host-trade-gear_error.log warn;
+
+        location / {
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $http_connection;
+          proxy_http_version 1.1;
+
+          # Proxy!
+          include conf.d/include/proxy.conf;
+        }
+      }
+    mode: "0644"
+  become: yes
+  register: status_nginx_tradegear
+
+- name: "Reload Nginx Proxy Manager jika config berubah"
+  ansible.builtin.shell: "docker exec nginx-proxy-manager nginx -s reload"
+  when: status_nginx_tradegear.changed
+  become: false
+
