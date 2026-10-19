@@ -100,6 +100,40 @@
           include conf.d/include/proxy.conf;
         }
       }
+
+      # ------------------------------------------------------------
+      # MetaTrader 5 noVNC Terminal (Staging & Production)
+      # ------------------------------------------------------------
+      server {
+        set $forward_scheme http;
+        set $server         "100.68.87.58";
+        set $port           {{ robot_mt5_vnc_port | default('8088') }};
+
+        listen 80;
+        listen [::]:80;
+
+        server_name {{ robot_vnc_domain | default('staging-mt5.homever.my.id mt5.trade-gear.homever.my.id') }};
+        http2 off;
+
+        # Block Exploits
+        include conf.d/include/block-exploits.conf;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $http_connection;
+        proxy_http_version 1.1;
+
+        access_log /data/logs/proxy-host-trade-gear-vnc_access.log proxy;
+        error_log /data/logs/proxy-host-trade-gear-vnc_error.log warn;
+
+        location / {
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $http_connection;
+          proxy_http_version 1.1;
+
+          # Proxy!
+          include conf.d/include/proxy.conf;
+        }
+      }
     mode: "0644"
   become: yes
   register: status_nginx_tradegear

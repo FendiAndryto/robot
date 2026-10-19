@@ -11,6 +11,35 @@ import {
   Settings2
 } from 'lucide-react';
 
+const getDefaultVncUrl = () => {
+  if (import.meta.env.VITE_MT5_VNC_URL) {
+    return import.meta.env.VITE_MT5_VNC_URL;
+  }
+  if (typeof window === 'undefined') return 'http://localhost:8088';
+
+  const host = window.location.hostname;
+  // Local development or direct IP
+  if (host === 'localhost' || host === '127.0.0.1' || /^(\d+\.){3}\d+$/.test(host)) {
+    return `${window.location.protocol}//${host}:8088`;
+  }
+  // Staging deployment
+  if (host.includes('staging-trade-gear.homever.my.id')) {
+    return 'https://staging-mt5.homever.my.id';
+  }
+  // Production deployment
+  if (host.includes('trade-gear.homever.my.id')) {
+    return 'https://mt5.trade-gear.homever.my.id';
+  }
+  // Fallback for custom homever.my.id subdomains
+  if (host.endsWith('homever.my.id')) {
+    if (host.startsWith('staging-')) {
+      return 'https://staging-mt5.homever.my.id';
+    }
+    return 'https://mt5.trade-gear.homever.my.id';
+  }
+  return `${window.location.protocol}//${host}:8088`;
+};
+
 export default function Mt5ConnectModal({
   isOpen,
   onClose,
@@ -18,12 +47,23 @@ export default function Mt5ConnectModal({
   accountNumber,
   onCheckStatus
 }) {
-  const defaultUrl =
-    import.meta.env.VITE_MT5_VNC_URL ||
-    `${window.location.protocol}//${window.location.hostname}:8088`;
+  const defaultUrl = getDefaultVncUrl();
 
   const [vncUrl, setVncUrl] = useState(() => {
-    return localStorage.getItem('robot_mt5_vnc_url') || defaultUrl;
+    const saved = localStorage.getItem('robot_mt5_vnc_url');
+    // Sanitize stale URL with port :8088 on public domain that causes timeouts
+    if (
+      saved &&
+      saved.includes(':8088') &&
+      !saved.includes('localhost') &&
+      !saved.includes('127.0.0.1') &&
+      !/(\d+\.){3}\d+/.test(saved)
+    ) {
+      const fresh = getDefaultVncUrl();
+      localStorage.setItem('robot_mt5_vnc_url', fresh);
+      return fresh;
+    }
+    return saved || defaultUrl;
   });
   const [showConfig, setShowConfig] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -99,6 +139,32 @@ export default function Mt5ConnectModal({
                 Memerlukan login broker
               </span>
             )}
+          </div>
+
+          {/* VNC Terminal Web Credentials Card */}
+          <div
+            style={{
+              padding: '12px 14px',
+              background: 'rgba(56, 189, 248, 0.08)',
+              border: '1px solid rgba(56, 189, 248, 0.25)',
+              borderRadius: '8px',
+              fontSize: '0.8rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#38bdf8', fontWeight: 600 }}>
+              <KeyRound size={14} />
+              <span>Kredensial Akses Terminal Web MT5 (Browser Prompt):</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', color: 'var(--text-main, #e2e8f0)', fontFamily: 'monospace' }}>
+              <div>User: <strong>fendi</strong></div>
+              <div>Password: <strong>fendi123</strong></div>
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)' }}>
+              * Masukkan user & password di atas jika browser Anda meminta otentikasi saat halaman MT5 terbuka.
+            </div>
           </div>
 
           {/* 3-Step Guided Walkthrough */}
