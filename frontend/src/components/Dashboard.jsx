@@ -17,6 +17,8 @@ import Navbar from './Navbar';
 import MetricCard from './MetricCard';
 import OrderForm from './OrderForm';
 import PositionsTable from './PositionsTable';
+import KillSwitchModal from './KillSwitchModal';
+import RiskBanner from './RiskBanner';
 import { api } from '../services/api';
 
 const formatCurrency = (val, currency = 'USD') => {
@@ -34,6 +36,8 @@ export default function Dashboard({ user, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [pollInterval, setPollInterval] = useState(1000);
   const [lastFetchTime, setLastFetchTime] = useState(Date.now());
+  const [isKillSwitchModalOpen, setIsKillSwitchModalOpen] = useState(false);
+  const [isUnlockingEngine, setIsUnlockingEngine] = useState(false);
   const timerRef = useRef(null);
 
   const fetchStatus = async () => {
@@ -63,9 +67,28 @@ export default function Dashboard({ user, onLogout }) {
     };
   }, [pollInterval]);
 
+  const handleTriggerKillSwitch = async (reason) => {
+    await api.triggerKillSwitch(reason);
+    await fetchStatus();
+  };
+
+  const handleUnlockEngine = async () => {
+    setIsUnlockingEngine(true);
+    try {
+      await api.disarmKillSwitch();
+      await fetchStatus();
+    } finally {
+      setIsUnlockingEngine(false);
+    }
+  };
+
   const metrics = bridgeStatus?.metrics || {};
   const isConnected = bridgeStatus?.is_connected || false;
   const terminalConnected = bridgeStatus?.terminal_connected || false;
+  const isKillSwitchActive = bridgeStatus?.is_kill_switch_active || false;
+  const killSwitchReason = bridgeStatus?.kill_switch_reason;
+  const killSwitchTime = bridgeStatus?.kill_switch_time;
+
   const currency = metrics.currency || 'USD';
   const balance = metrics.balance ?? 0;
   const equity = metrics.equity ?? 0;
@@ -105,9 +128,21 @@ export default function Dashboard({ user, onLogout }) {
         onPollIntervalChange={setPollInterval}
         username={user?.username}
         onLogout={onLogout}
+        onTriggerKillSwitch={() => setIsKillSwitchModalOpen(true)}
+        isKillSwitchActive={isKillSwitchActive}
       />
 
       <main className="dashboard-content animate-fade-in">
+        {/* Emergency Kill Switch Banner */}
+        {isKillSwitchActive && (
+          <RiskBanner
+            reason={killSwitchReason}
+            triggeredAt={killSwitchTime}
+            onUnlock={handleUnlockEngine}
+            isUnlocking={isUnlockingEngine}
+          />
+        )}
+
         {/* Offline / Disconnected Alert Banner */}
         {!isConnected && (
           <div className="disconnect-alert" id="disconnect-alert-banner">
@@ -233,8 +268,17 @@ export default function Dashboard({ user, onLogout }) {
 
         {/* Manual Trading Workbench (Order Form + Live Positions Table) */}
         <div className="trading-workbench" id="trading-workbench">
-          <OrderForm onOrderSubmitted={fetchStatus} />
-          <PositionsTable positions={positions} currency={currency} onActionCompleted={fetchStatus} />
+          <OrderForm
+            equity={equity}
+            currency={currency}
+            isKillSwitchActive={isKillSwitchActive}
+            onOrderSubmitted={fetchStatus}
+          />
+          <PositionsTable
+            positions={positions}
+            currency={currency}
+            onActionCompleted={fetchStatus}
+          />
         </div>
 
         {/* Live Telemetry Diagnostics Box */}
@@ -260,9 +304,9 @@ export default function Dashboard({ user, onLogout }) {
             </div>
 
             <div className="telemetry-item">
-              <div className="telemetry-item-label">Last Timestamp</div>
-              <div className="telemetry-item-val">
-                {lastHeartbeatAt ? new Date(lastHeartbeatAt * 1000).toLocaleTimeString() : 'N/A'}
+              <div className="telemetry-item-label">Engine Security</div>
+              <div className="telemetry-item-val" style={{ color: isKillSwitchActive ? 'var(--accent-rose)' : 'var(--accent-emerald)' }}>
+                {isKillSwitchActive ? 'LOCKED (Kill Switch)' : 'NORMAL (Ready)'}
               </div>
             </div>
 
@@ -273,6 +317,16 @@ export default function Dashboard({ user, onLogout }) {
           </div>
         </section>
       </main>
+
+      {/* Emergency Kill Switch Modal */}
+      <KillSwitchModal
+        isOpen={isKillSwitchModalOpen}
+        onClose={() => setIsKillSwitchModalOpen(false)}
+        onConfirm={handleTriggerKillSwitch}
+        openPositionsCount={openPositions}
+        floatingPnl={floatingPnl}
+        currency={currency}
+      />
     </div>
   );
 }

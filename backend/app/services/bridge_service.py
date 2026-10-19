@@ -21,6 +21,82 @@ class BridgeService:
         self._latest_payload: Optional[HeartbeatPayload] = None
         self._last_received_time: Optional[float] = None
         self._pending_commands: List[CommandItem] = []
+        self._is_kill_switch_active: bool = False
+        self._kill_switch_reason: Optional[str] = None
+        self._kill_switch_time: Optional[int] = None
+        self._kill_switch_user: Optional[str] = None
+
+    def reset_state(self):
+        """Reset internal state (primarily used for test isolation)."""
+        with self._lock:
+            self._latest_payload = None
+            self._last_received_time = None
+            self._pending_commands.clear()
+            self._is_kill_switch_active = False
+            self._kill_switch_reason = None
+            self._kill_switch_time = None
+            self._kill_switch_user = None
+
+    def get_equity(self) -> Optional[float]:
+        with self._lock:
+            if self._latest_payload and self._latest_payload.equity > 0:
+                return self._latest_payload.equity
+            return None
+
+    def trigger_kill_switch(self, reason: str = "Manual Emergency Kill Switch Triggered", username: str = "admin") -> dict:
+        current_time = int(time.time())
+        cmd_id = f"cmd_{current_time}_kill_{uuid.uuid4().hex[:6]}"
+        kill_cmd = CommandItem(
+            command_id=cmd_id,
+            action="CLOSE_ALL",
+            created_at=current_time
+        )
+        with self._lock:
+            self._is_kill_switch_active = True
+            self._kill_switch_reason = reason
+            self._kill_switch_time = current_time
+            self._kill_switch_user = username
+            # Put CLOSE_ALL at the head of commands so MT5 executes it immediately on next poll
+            self._pending_commands.insert(0, kill_cmd)
+
+        return {
+            "status": "engaged",
+            "is_kill_switch_active": True,
+            "reason": reason,
+            "triggered_at": current_time,
+            "triggered_by": username,
+            "command_id": cmd_id,
+            "message": "Emergency Kill Switch engaged. Blanket CLOSE_ALL command dispatched to MT5. Trading engine locked."
+        }
+
+    def disarm_kill_switch(self, username: str = "admin") -> dict:
+        with self._lock:
+            self._is_kill_switch_active = False
+            prev_reason = self._kill_switch_reason
+            self._kill_switch_reason = None
+            self._kill_switch_time = None
+            self._kill_switch_user = None
+
+        return {
+            "status": "disarmed",
+            "is_kill_switch_active": False,
+            "message": "Trading engine disarmed and unlocked. Normal trading operations restored.",
+            "unlocked_by": username
+        }
+
+    def get_kill_switch_status(self) -> dict:
+        with self._lock:
+            return {
+                "is_kill_switch_active": self._is_kill_switch_active,
+                "kill_switch_reason": self._kill_switch_reason,
+                "kill_switch_time": self._kill_switch_time,
+                "kill_switch_user": self._kill_switch_user,
+                "default_risk_percent": settings.DEFAULT_RISK_PER_TRADE_PERCENT,
+                "max_risk_percent": settings.MAX_RISK_PER_TRADE_PERCENT,
+                "max_daily_drawdown_percent": settings.MAX_DAILY_DRAWDOWN_PERCENT,
+                "min_lot": settings.MIN_LOT_SIZE,
+                "max_lot": settings.MAX_LOT_SIZE
+            }
 
     def process_heartbeat(self, payload: HeartbeatPayload) -> HeartbeatResponse:
         current_time = time.time()
@@ -41,6 +117,14 @@ class BridgeService:
     def submit_order(self, order_req: OrderRequest) -> OrderResponse:
         action = order_req.action.upper().strip()
         current_time = int(time.time())
+
+        # Safety Check: Block new trade entries if Kill Switch is active
+        with self._lock:
+            if self._is_kill_switch_active and action in ("BUY", "SELL"):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Trading engine is locked by emergency Kill Switch ({self._kill_switch_reason or 'Emergency lockdown'}). Disarm Kill Switch before submitting new orders."
+                )
 
         if action in ("BUY", "SELL"):
             if not order_req.symbol or not order_req.symbol.strip():
@@ -121,7 +205,10 @@ class BridgeService:
                     seconds_since_last_heartbeat=None,
                     metrics=None,
                     positions=[],
-                    pending_commands_count=pending_count
+                    pending_commands_count=pending_count,
+                    is_kill_switch_active=self._is_kill_switch_active,
+                    kill_switch_reason=self._kill_switch_reason,
+                    kill_switch_time=self._kill_switch_time
                 )
             
             diff = current_time - self._last_received_time
@@ -135,7 +222,10 @@ class BridgeService:
                 seconds_since_last_heartbeat=round(diff, 2),
                 metrics=self._latest_payload,
                 positions=positions,
-                pending_commands_count=pending_count
+                pending_commands_count=pending_count,
+                is_kill_switch_active=self._is_kill_switch_active,
+                kill_switch_reason=self._kill_switch_reason,
+                kill_switch_time=self._kill_switch_time
             )
 
 

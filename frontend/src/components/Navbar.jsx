@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, LogOut, Clock, Wifi, WifiOff } from 'lucide-react';
+import { Bot, LogOut, Clock, AlertOctagon, Lock } from 'lucide-react';
 
 export default function Navbar({
   isConnected,
@@ -7,7 +7,9 @@ export default function Navbar({
   pollInterval,
   onPollIntervalChange,
   username,
-  onLogout
+  onLogout,
+  onTriggerKillSwitch,
+  isKillSwitchActive = false
 }) {
   return (
     <header className="navbar" id="main-navbar">
@@ -51,6 +53,27 @@ export default function Navbar({
             <option value={5000}>Refresh: 5s</option>
           </select>
         </div>
+
+        {/* Emergency Kill Switch Button */}
+        <button
+          type="button"
+          className={`btn-kill-switch ${isKillSwitchActive ? 'active' : ''}`}
+          id="navbar-kill-switch-btn"
+          onClick={onTriggerKillSwitch}
+          title={isKillSwitchActive ? 'Trading locked by Kill Switch' : 'Trigger Emergency Blanket Shutdown'}
+        >
+          {isKillSwitchActive ? (
+            <>
+              <Lock size={15} />
+              <span>ENGINE LOCKED</span>
+            </>
+          ) : (
+            <>
+              <AlertOctagon size={15} />
+              <span>KILL SWITCH</span>
+            </>
+          )}
+        </button>
 
         {/* User Info & Logout */}
         <div className="user-badge" id="current-user-badge">

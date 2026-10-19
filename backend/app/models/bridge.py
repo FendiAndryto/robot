@@ -73,3 +73,6 @@ class BridgeStatusResponse(BaseModel):
     metrics: Optional[HeartbeatPayload] = None
     positions: List[PositionItem] = []
     pending_commands_count: int = 0
+    is_kill_switch_active: bool = False
+    kill_switch_reason: Optional[str] = None
+    kill_switch_time: Optional[int] = None

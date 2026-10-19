@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     BRIDGE_POLL_INTERVAL_MS: int = 500
     HEARTBEAT_TIMEOUT_SECONDS: int = 10
     
+    # Risk Management Defaults
+    DEFAULT_RISK_PER_TRADE_PERCENT: float = 1.0
+    MAX_RISK_PER_TRADE_PERCENT: float = 10.0
+    MAX_DAILY_DRAWDOWN_PERCENT: float = 3.0
+    MAX_SPREAD_POINTS: int = 30
+    MIN_LOT_SIZE: float = 0.01
+    MAX_LOT_SIZE: float = 100.0
+    
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
         env_file_encoding="utf-8",

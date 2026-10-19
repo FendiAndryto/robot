@@ -117,5 +117,55 @@ export const api = {
     return this.submitOrder({
       action: 'CLOSE_ALL'
     });
+  },
+
+  // Risk Management & Emergency Kill Switch
+  async getRiskStatus() {
+    const res = await fetch(`${API_BASE}/api/v1/risk/status`, {
+      method: 'GET',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) {
+      throw new Error('Failed to retrieve risk configuration');
+    }
+    return res.json();
+  },
+
+  async calculateLot(params) {
+    const res = await fetch(`${API_BASE}/api/v1/risk/calculate-lot`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(params)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Lot calculation failed' }));
+      throw new Error(err.detail || 'Position sizing calculation failed');
+    }
+    return res.json();
+  },
+
+  async triggerKillSwitch(reason = 'Manual emergency kill switch triggered') {
+    const res = await fetch(`${API_BASE}/api/v1/risk/kill-switch`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ reason })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to engage Kill Switch' }));
+      throw new Error(err.detail || 'Emergency Kill Switch activation failed');
+    }
+    return res.json();
+  },
+
+  async disarmKillSwitch() {
+    const res = await fetch(`${API_BASE}/api/v1/risk/unlock`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to disarm Kill Switch' }));
+      throw new Error(err.detail || 'Failed to unlock trading engine');
+    }
+    return res.json();
   }
 };
