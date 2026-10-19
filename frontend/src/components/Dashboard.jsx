@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import Navbar from './Navbar';
 import MetricCard from './MetricCard';
+import OrderForm from './OrderForm';
+import PositionsTable from './PositionsTable';
 import { api } from '../services/api';
 
 const formatCurrency = (val, currency = 'USD') => {
@@ -76,6 +78,7 @@ export default function Dashboard({ user, onLogout }) {
   const accountNumber = metrics.account_number || 0;
   const lastHeartbeatAt = bridgeStatus?.last_heartbeat_at;
   const secondsSinceHeartbeat = bridgeStatus?.seconds_since_last_heartbeat ?? null;
+  const positions = bridgeStatus?.positions || metrics.positions || [];
 
   // Margin progress bar calculation
   let marginProgress = 100;
@@ -166,7 +169,7 @@ export default function Dashboard({ user, onLogout }) {
             id="metric-balance-card"
             label="Account Balance"
             value={formatCurrency(balance, currency)}
-            subtext="Settled account equity"
+            subtext="Settled account funds"
             icon={DollarSign}
             variant="cyan"
           />
@@ -226,6 +229,12 @@ export default function Dashboard({ user, onLogout }) {
             icon={Layers}
             variant={openPositions > 0 ? 'cyan' : 'default'}
           />
+        </div>
+
+        {/* Manual Trading Workbench (Order Form + Live Positions Table) */}
+        <div className="trading-workbench" id="trading-workbench">
+          <OrderForm onOrderSubmitted={fetchStatus} />
+          <PositionsTable positions={positions} currency={currency} onActionCompleted={fetchStatus} />
         </div>
 
         {/* Live Telemetry Diagnostics Box */}

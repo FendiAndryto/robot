@@ -5,8 +5,11 @@
 //+------------------------------------------------------------------+
 #property copyright "Robot Trading System"
 #property link      "https://github.com/FendiAndryto/robot"
-#property version   "1.10"
+#property version   "1.20"
 #property description "FastAPI Web-to-MT5 Telemetry & Execution Bridge EA"
+
+//--- Standard MT5 Trade Library
+#include <Trade\Trade.mqh>
 
 //--- WinINet Constants & Imports (64-bit MT5 for seamless networking)
 #define INTERNET_OPEN_TYPE_PRECONFIG 0
@@ -29,27 +32,38 @@
 
 //--- Inputs
 input group "--- Bridge Settings ---"
-input string InpBackendUrl        = "http://backend:8000"; // Backend API URL (or http://host.docker.internal:8008)
+input string InpBackendUrl        = "http://backend:8000"; // Backend API URL
 input int    InpHeartbeatInterval = 1;                     // Heartbeat interval in seconds
 input bool   InpVerboseLog        = false;                 // Print detailed logs to Experts tab
 
-//--- Global Variables
+input group "--- Trade Settings ---"
+input ulong  InpMagicNumber       = 778899;                // Magic Number for orders
+input ulong  InpDeviationPoints   = 20;                    // Maximum slippage in points
+
+//--- Global Objects & Variables
+CTrade   g_trade;
 datetime g_last_heartbeat = 0;
 int      g_consecutive_errors = 0;
 string   g_status_msg = "Initializing...";
+
+// Forward Declarations
+void SendHeartbeat();
+void ProcessBackendCommands(string responseJson);
+void UpdateChartHUD(string status_text);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(">>> [BridgeEA] Initializing MT5 FastAPI Bridge EA v1.10...");
+   Print(">>> [BridgeEA] Initializing MT5 FastAPI Bridge EA v1.20...");
    Print(">>> [BridgeEA] Target Backend: ", InpBackendUrl);
+   PrintFormat(">>> [BridgeEA] Magic Number: %I64u, Deviation: %I64u pts", InpMagicNumber, InpDeviationPoints);
    
-   if(InpHeartbeatInterval < 1)
-   {
-      Print(">>> [BridgeEA] Heartbeat interval too low. Setting to 1s.");
-   }
+   // Configure trade executor
+   g_trade.SetExpertMagicNumber(InpMagicNumber);
+   g_trade.SetDeviationInPoints(InpDeviationPoints);
+   g_trade.SetTypeFillingBySymbol(_Symbol);
    
    // Set timer for periodic heartbeat
    EventSetTimer(MathMax(1, InpHeartbeatInterval));
@@ -208,7 +222,151 @@ string EscapeJsonString(string src)
 }
 
 //+------------------------------------------------------------------+
-//| Build JSON telemetry payload from native MT5 account functions   |
+//| Simple string extract helper for JSON key-value                  |
+//+------------------------------------------------------------------+
+string ExtractJsonValue(string jsonBlock, string key)
+{
+   string search = "\"" + key + "\":";
+   int pos = StringFind(jsonBlock, search);
+   if(pos < 0) return "";
+   
+   pos += StringLen(search);
+   
+   // Skip whitespace
+   while(pos < StringLen(jsonBlock) && (StringGetCharacter(jsonBlock, pos) == ' ' || StringGetCharacter(jsonBlock, pos) == '\t'))
+      pos++;
+      
+   if(pos >= StringLen(jsonBlock)) return "";
+   
+   // String value
+   if(StringGetCharacter(jsonBlock, pos) == '\"')
+   {
+      pos++;
+      int endPos = StringFind(jsonBlock, "\"", pos);
+      if(endPos < 0) return "";
+      return StringSubstr(jsonBlock, pos, endPos - pos);
+   }
+   
+   // Number, boolean, or null
+   int endPos = pos;
+   while(endPos < StringLen(jsonBlock))
+   {
+      ushort ch = StringGetCharacter(jsonBlock, endPos);
+      if(ch == ',' || ch == '}' || ch == ']' || ch == ' ' || ch == '\r' || ch == '\n')
+         break;
+      endPos++;
+   }
+   
+   string val = StringSubstr(jsonBlock, pos, endPos - pos);
+   if(val == "null") return "";
+   return val;
+}
+
+//+------------------------------------------------------------------+
+//| Process and execute trade commands from backend response         |
+//+------------------------------------------------------------------+
+void ProcessBackendCommands(string responseJson)
+{
+   int cmdPos = StringFind(responseJson, "\"commands\":");
+   if(cmdPos < 0) return;
+   
+   int arrayStart = StringFind(responseJson, "[", cmdPos);
+   if(arrayStart < 0) return;
+   
+   int arrayEnd = StringFind(responseJson, "]", arrayStart);
+   if(arrayEnd <= arrayStart + 1) return; // empty array "[]"
+   
+   string commandsArray = StringSubstr(responseJson, arrayStart + 1, arrayEnd - arrayStart - 1);
+   
+   int curPos = 0;
+   while(curPos < StringLen(commandsArray))
+   {
+      int objStart = StringFind(commandsArray, "{", curPos);
+      if(objStart < 0) break;
+      int objEnd = StringFind(commandsArray, "}", objStart);
+      if(objEnd < 0) break;
+      
+      string cmdItem = StringSubstr(commandsArray, objStart, objEnd - objStart + 1);
+      curPos = objEnd + 1;
+      
+      string cmdId = ExtractJsonValue(cmdItem, "command_id");
+      string action = ExtractJsonValue(cmdItem, "action");
+      string symbol = ExtractJsonValue(cmdItem, "symbol");
+      if(symbol == "") symbol = _Symbol;
+      
+      double volume = StringToDouble(ExtractJsonValue(cmdItem, "volume"));
+      if(volume <= 0.0) volume = 0.01;
+      
+      string slStr = ExtractJsonValue(cmdItem, "sl");
+      double sl = (slStr != "" ? StringToDouble(slStr) : 0.0);
+      
+      string tpStr = ExtractJsonValue(cmdItem, "tp");
+      double tp = (tpStr != "" ? StringToDouble(tpStr) : 0.0);
+      
+      string ticketStr = ExtractJsonValue(cmdItem, "ticket");
+      ulong ticket = (ticketStr != "" ? (ulong)StringToInteger(ticketStr) : 0);
+      
+      PrintFormat(">>> [BridgeEA] Received Command [%s]: Action=%s Symbol=%s Vol=%.2f Ticket=%I64u",
+                  cmdId, action, symbol, volume, ticket);
+                  
+      if(action == "BUY")
+      {
+         ResetLastError();
+         if(g_trade.Buy(volume, symbol, 0, sl, tp, "Web Buy #" + cmdId))
+         {
+            PrintFormat(">>> [BridgeEA] BUY SUCCESS: Ticket #%I64u Price=%.5f", g_trade.ResultOrder(), g_trade.ResultPrice());
+         }
+         else
+         {
+            PrintFormat(">>> [BridgeEA] BUY FAILED: Retcode=%u Error=%d", g_trade.ResultRetcode(), GetLastError());
+         }
+      }
+      else if(action == "SELL")
+      {
+         ResetLastError();
+         if(g_trade.Sell(volume, symbol, 0, sl, tp, "Web Sell #" + cmdId))
+         {
+            PrintFormat(">>> [BridgeEA] SELL SUCCESS: Ticket #%I64u Price=%.5f", g_trade.ResultOrder(), g_trade.ResultPrice());
+         }
+         else
+         {
+            PrintFormat(">>> [BridgeEA] SELL FAILED: Retcode=%u Error=%d", g_trade.ResultRetcode(), GetLastError());
+         }
+      }
+      else if(action == "CLOSE")
+      {
+         if(ticket > 0)
+         {
+            ResetLastError();
+            if(g_trade.PositionClose(ticket))
+            {
+               PrintFormat(">>> [BridgeEA] CLOSE SUCCESS: Ticket #%I64u", ticket);
+            }
+            else
+            {
+               PrintFormat(">>> [BridgeEA] CLOSE FAILED: Ticket #%I64u Retcode=%u Error=%d", ticket, g_trade.ResultRetcode(), GetLastError());
+            }
+         }
+      }
+      else if(action == "CLOSE_ALL")
+      {
+         Print(">>> [BridgeEA] Executing CLOSE_ALL positions...");
+         int total = PositionsTotal();
+         for(int i = total - 1; i >= 0; i--)
+         {
+            ulong posTicket = PositionGetTicket(i);
+            if(posTicket > 0)
+            {
+               g_trade.PositionClose(posTicket);
+            }
+         }
+         Print(">>> [BridgeEA] CLOSE_ALL completed.");
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Build JSON telemetry payload with live positions list            |
 //+------------------------------------------------------------------+
 string BuildHeartbeatJson()
 {
@@ -241,12 +399,51 @@ string BuildHeartbeatJson()
    
    bool connected = (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
    int positions = PositionsTotal();
-   
-   // Use TimeLocal() so timestamp advances even when market quotes are idle/closed
    long timestamp = (long)TimeLocal();
 
+   // Build Open Positions Array
+   string positionsJson = "[";
+   int count = 0;
+   
+   for(int i = 0; i < positions; i++)
+   {
+      ulong posTicket = PositionGetTicket(i);
+      if(posTicket > 0)
+      {
+         string posSymbol = PositionGetString(POSITION_SYMBOL);
+         long posType = PositionGetInteger(POSITION_TYPE);
+         double posVol = PositionGetDouble(POSITION_VOLUME);
+         double posOpenPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+         double posCurrentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+         double posSL = PositionGetDouble(POSITION_SL);
+         double posTP = PositionGetDouble(POSITION_TP);
+         double posProfit = PositionGetDouble(POSITION_PROFIT);
+         long posTime = PositionGetInteger(POSITION_TIME);
+         long posMagic = PositionGetInteger(POSITION_MAGIC);
+         
+         if(count > 0) positionsJson += ",";
+         
+         positionsJson += StringFormat(
+            "{\"ticket\":%I64u,\"symbol\":\"%s\",\"type\":\"%s\",\"volume\":%.2f,\"open_price\":%.5f,\"current_price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"pnl\":%.2f,\"open_time\":%I64d,\"magic\":%I64d}",
+            posTicket,
+            EscapeJsonString(posSymbol),
+            (posType == POSITION_TYPE_BUY ? "BUY" : "SELL"),
+            posVol,
+            posOpenPrice,
+            posCurrentPrice,
+            posSL,
+            posTP,
+            posProfit,
+            posTime,
+            posMagic
+         );
+         count++;
+      }
+   }
+   positionsJson += "]";
+
    string json = StringFormat(
-      "{\"account_number\":%I64d,\"server\":\"%s\",\"currency\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"margin\":%.2f,\"free_margin\":%.2f,\"margin_level\":%.2f,\"floating_pnl\":%.2f,\"terminal_connected\":%s,\"open_positions\":%d,\"timestamp\":%I64d}",
+      "{\"account_number\":%I64d,\"server\":\"%s\",\"currency\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"margin\":%.2f,\"free_margin\":%.2f,\"margin_level\":%.2f,\"floating_pnl\":%.2f,\"terminal_connected\":%s,\"open_positions\":%d,\"positions\":%s,\"timestamp\":%I64d}",
       login,
       server,
       currency,
@@ -258,6 +455,7 @@ string BuildHeartbeatJson()
       profit,
       connected ? "true" : "false",
       positions,
+      positionsJson,
       timestamp
    );
    
@@ -295,9 +493,11 @@ void SendHeartbeat()
       g_consecutive_errors = 0;
       g_status_msg = "Connected (Heartbeat OK - 200)";
       
+      string responseStr = CharArrayToString(resultData, 0, WHOLE_ARRAY, CP_UTF8);
+      ProcessBackendCommands(responseStr);
+      
       if(InpVerboseLog)
       {
-         string responseStr = CharArrayToString(resultData, 0, WHOLE_ARRAY, CP_UTF8);
          Print(">>> [BridgeEA] Heartbeat OK. Response: ", responseStr);
       }
       UpdateChartHUD(g_status_msg);
@@ -316,6 +516,8 @@ void SendHeartbeat()
       g_last_heartbeat = TimeLocal();
       g_consecutive_errors = 0;
       g_status_msg = "Connected (WinINet Heartbeat OK)";
+      
+      ProcessBackendCommands(wininetResp);
       
       if(InpVerboseLog)
       {

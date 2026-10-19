@@ -1,7 +1,16 @@
 import time
-from fastapi import APIRouter, status
-from app.models.bridge import HeartbeatPayload, HeartbeatResponse, BridgeStatusResponse
+from typing import List
+from fastapi import APIRouter, Depends, status
+from app.models.bridge import (
+    HeartbeatPayload,
+    HeartbeatResponse,
+    BridgeStatusResponse,
+    OrderRequest,
+    OrderResponse,
+    PositionItem,
+)
 from app.services.bridge_service import bridge_service
+from app.core.deps import get_current_user
 
 router = APIRouter(prefix="/bridge", tags=["Bridge"])
 
@@ -24,6 +33,29 @@ async def receive_heartbeat(payload: HeartbeatPayload):
 )
 async def get_bridge_status():
     return bridge_service.get_status()
+
+
+@router.post(
+    "/order",
+    response_model=OrderResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Queue a manual trading order for MT5 execution"
+)
+async def submit_order(
+    order_req: OrderRequest,
+    current_user: str = Depends(get_current_user)
+):
+    return bridge_service.submit_order(order_req)
+
+
+@router.get(
+    "/positions",
+    response_model=List[PositionItem],
+    status_code=status.HTTP_200_OK,
+    summary="Retrieve currently open trading positions from MT5"
+)
+async def get_positions():
+    return bridge_service.get_positions()
 
 
 @router.get(

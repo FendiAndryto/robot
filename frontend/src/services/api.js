@@ -63,7 +63,7 @@ export const api = {
     }
   },
 
-  // Bridge Status & Account Telemetry
+  // Bridge Status & Telemetry
   async getBridgeStatus() {
     const res = await fetch(`${API_BASE}/api/v1/bridge/status`, {
       method: 'GET',
@@ -75,5 +75,47 @@ export const api = {
     }
     
     return res.json();
+  },
+
+  // Trade Execution
+  async submitOrder(orderData) {
+    const res = await fetch(`${API_BASE}/api/v1/bridge/order`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(orderData)
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Order failed' }));
+      throw new Error(err.detail || 'Order execution failed');
+    }
+
+    return res.json();
+  },
+
+  async getPositions() {
+    const res = await fetch(`${API_BASE}/api/v1/bridge/positions`, {
+      method: 'GET',
+      headers: getAuthHeaders()
+    });
+
+    if (!res.ok) {
+      throw new Error('Failed to retrieve open positions');
+    }
+
+    return res.json();
+  },
+
+  async closePosition(ticket) {
+    return this.submitOrder({
+      action: 'CLOSE',
+      ticket: Number(ticket)
+    });
+  },
+
+  async closeAllPositions() {
+    return this.submitOrder({
+      action: 'CLOSE_ALL'
+    });
   }
 };
