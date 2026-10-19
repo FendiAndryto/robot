@@ -12,11 +12,17 @@ class Settings(BaseSettings):
     
     CORS_ORIGINS: str = ""
     
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = "change_this_password"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+    JWT_ALGORITHM: str = "HS256"
+    
     MT5_MAGIC_NUMBER: int = 778899
+    BRIDGE_POLL_INTERVAL_MS: int = 500
     HEARTBEAT_TIMEOUT_SECONDS: int = 10
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
         extra="ignore"
     )

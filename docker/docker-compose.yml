@@ -26,8 +26,25 @@ services:
       - "${BRIDGE_API_PORT:-8089}:8000"
     environment:
       - SECRET_KEY=${SECRET_KEY:-default_secret_key_12345}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-change_this_password}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
       - MT5_MAGIC_NUMBER=${MT5_MAGIC_NUMBER:-778899}
-      - ALLOWED_HOSTS=*
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-*}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+    networks:
+      - robot_net
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: robot_frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - backend
     networks:
       - robot_net
 
