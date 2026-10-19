@@ -19,6 +19,7 @@ import OrderForm from './OrderForm';
 import PositionsTable from './PositionsTable';
 import KillSwitchModal from './KillSwitchModal';
 import RiskBanner from './RiskBanner';
+import SignalsPanel from './SignalsPanel';
 import { api } from '../services/api';
 
 const formatCurrency = (val, currency = 'USD') => {
@@ -35,10 +36,19 @@ export default function Dashboard({ user, onLogout }) {
   const [bridgeStatus, setBridgeStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [pollInterval, setPollInterval] = useState(1000);
-  const [lastFetchTime, setLastFetchTime] = useState(Date.now());
+  const [signals, setSignals] = useState([]);
   const [isKillSwitchModalOpen, setIsKillSwitchModalOpen] = useState(false);
   const [isUnlockingEngine, setIsUnlockingEngine] = useState(false);
   const timerRef = useRef(null);
+
+  const fetchSignals = async () => {
+    try {
+      const data = await api.getSignals();
+      setSignals(data);
+    } catch {
+      // Ignore transient network errors during polling
+    }
+  };
 
   const fetchStatus = async () => {
     try {
@@ -60,7 +70,11 @@ export default function Dashboard({ user, onLogout }) {
 
   useEffect(() => {
     fetchStatus();
-    timerRef.current = setInterval(fetchStatus, pollInterval);
+    fetchSignals();
+    timerRef.current = setInterval(() => {
+      fetchStatus();
+      fetchSignals();
+    }, pollInterval);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -265,6 +279,17 @@ export default function Dashboard({ user, onLogout }) {
             variant={openPositions > 0 ? 'cyan' : 'default'}
           />
         </div>
+
+        {/* Strategy Recommendations & Semi-Auto Signal Approval */}
+        <SignalsPanel
+          signals={signals}
+          onRefreshSignals={fetchSignals}
+          isKillSwitchActive={isKillSwitchActive}
+          onOrderExecuted={() => {
+            fetchStatus();
+            fetchSignals();
+          }}
+        />
 
         {/* Manual Trading Workbench (Order Form + Live Positions Table) */}
         <div className="trading-workbench" id="trading-workbench">

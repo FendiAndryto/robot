@@ -167,5 +167,68 @@ export const api = {
       throw new Error(err.detail || 'Failed to unlock trading engine');
     }
     return res.json();
+  },
+
+  // Strategy Engine & Semi-Auto Signal Approval
+  async getSignals(includeAll = false) {
+    const query = includeAll ? '?all=true' : '';
+    const res = await fetch(`${API_BASE}/api/v1/strategy/signals${query}`, {
+      method: 'GET',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) {
+      throw new Error('Failed to fetch trading signals');
+    }
+    return res.json();
+  },
+
+  async approveSignal(signalId, customLot = null) {
+    const res = await fetch(`${API_BASE}/api/v1/strategy/signals/${signalId}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(customLot ? { custom_lot: customLot } : {})
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to approve signal' }));
+      throw new Error(err.detail || 'Signal approval failed');
+    }
+    return res.json();
+  },
+
+  async dismissSignal(signalId, reason = 'Manual dismissal by user') {
+    const res = await fetch(`${API_BASE}/api/v1/strategy/signals/${signalId}/dismiss`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ reason })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to dismiss signal' }));
+      throw new Error(err.detail || 'Signal dismissal failed');
+    }
+    return res.json();
+  },
+
+  async generateTestSignal(params = {}) {
+    const res = await fetch(`${API_BASE}/api/v1/strategy/generate-test-signal`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(params)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to generate test signal' }));
+      throw new Error(err.detail || 'Signal generation failed');
+    }
+    return res.json();
+  },
+
+  async getStrategyConfig() {
+    const res = await fetch(`${API_BASE}/api/v1/strategy/config`, {
+      method: 'GET',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) {
+      throw new Error('Failed to retrieve strategy configuration');
+    }
+    return res.json();
   }
 };

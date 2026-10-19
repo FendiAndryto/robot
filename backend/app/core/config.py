@@ -28,6 +28,18 @@ class Settings(BaseSettings):
     MAX_SPREAD_POINTS: int = 30
     MIN_LOT_SIZE: float = 0.01
     MAX_LOT_SIZE: float = 100.0
+
+    # Strategy Engine Defaults
+    STRATEGY_ENABLED: bool = True
+    STRATEGY_EMA_FAST: int = 9
+    STRATEGY_EMA_SLOW: int = 21
+    STRATEGY_RSI_PERIOD: int = 14
+    STRATEGY_RSI_OVERSOLD: float = 30.0
+    STRATEGY_RSI_OVERBOUGHT: float = 70.0
+    STRATEGY_DEFAULT_SL_PIPS: float = 25.0
+    STRATEGY_DEFAULT_RR_RATIO: float = 2.0
+    STRATEGY_SIGNAL_TTL_SECONDS: int = 300
+    STRATEGY_MONITORED_SYMBOLS: str = "EURUSD,GBPUSD,USDJPY,XAUUSD"
     
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
