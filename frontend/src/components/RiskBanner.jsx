@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertOctagon, Unlock, Loader2, ShieldAlert } from 'lucide-react';
+import { AlertOctagon, Unlock, Loader2 } from 'lucide-react';
 
 export default function RiskBanner({
   reason,

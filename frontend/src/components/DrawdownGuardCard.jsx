@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldAlert, ShieldCheck, Zap, AlertTriangle, TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, Zap, AlertTriangle } from 'lucide-react';
 
 const formatCurrency = (val, currency = 'USD') => {
   if (val === null || val === undefined) return '$0.00';
@@ -20,12 +20,9 @@ export default function DrawdownGuardCard({
   const {
     is_autopilot_active = false,
     is_drawdown_lockout_active = false,
-    drawdown_lockout_reason = null,
     starting_equity = 0,
-    current_equity = 0,
     closed_daily_pnl = 0,
     floating_pnl = 0,
-    total_daily_pnl = 0,
     daily_drawdown_amount = 0,
     daily_drawdown_percent = 0,
     max_daily_drawdown_percent = 3.0,

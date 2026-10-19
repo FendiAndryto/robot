@@ -19,12 +19,15 @@
 #define INTERNET_OPTION_CONNECT_TIMEOUT 2
 #define INTERNET_OPTION_RECEIVE_TIMEOUT 6
 #define INTERNET_OPTION_SEND_TIMEOUT    5
+#define HTTP_QUERY_STATUS_CODE          19
+#define HTTP_QUERY_FLAG_NUMBER          0x20000000
 
 #import "wininet.dll"
   long InternetOpenW(string lpszAgent, uint dwAccessType, string lpszProxy, string lpszProxyBypass, uint dwFlags);
   long InternetConnectW(long hInternet, string lpszServerName, ushort nServerPort, string lpszUsername, string lpszPassword, uint dwService, uint dwFlags, long dwContext);
   long HttpOpenRequestW(long hConnect, string lpszVerb, string lpszObjectName, string lpszVersion, string lpszReferer, long lplpszAcceptTypes, uint dwFlags, long dwContext);
   bool HttpSendRequestW(long hRequest, string lpszHeaders, uint dwHeadersLength, uchar &lpOptional[], uint dwOptionalLength);
+  bool HttpQueryInfoW(long hRequest, uint dwInfoLevel, uchar &lpBuffer[], uint &lpdwBufferLength, uint &lpdwIndex);
   bool InternetReadFile(long hFile, uchar &lpBuffer[], uint dwNumberOfBytesToRead, uint &lpdwNumberOfBytesRead);
   bool InternetSetOptionW(long hInternet, uint dwOption, uint &lpBuffer, uint dwBufferLength);
   bool InternetCloseHandle(long hInternet);
@@ -189,6 +192,24 @@ bool SendWinInetPost(string host, ushort port, bool useSSL, string path, string 
       return false;
    }
    
+   // Verify HTTP status code (must be 200 OK)
+   uint statusCode = 0;
+   uint statusLen = 4;
+   uint index = 0;
+   uchar statusBuf[4];
+   if(HttpQueryInfoW(hRequest, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, statusBuf, statusLen, index))
+   {
+      statusCode = (uint)(statusBuf[0] | (statusBuf[1] << 8) | (statusBuf[2] << 16) | (statusBuf[3] << 24));
+   }
+   if(statusCode != 200 && statusCode != 0)
+   {
+      PrintFormat(">>> [BridgeEA] WinINet HTTP response rejected with code %u", statusCode);
+      InternetCloseHandle(hRequest);
+      InternetCloseHandle(hConnect);
+      InternetCloseHandle(hSession);
+      return false;
+   }
+   
    responseStr = "";
    uchar readBuf[1024];
    uint bytesRead = 0;
@@ -308,6 +329,17 @@ void ProcessBackendCommands(string responseJson)
       
       PrintFormat(">>> [BridgeEA] Received Command [%s]: Action=%s Symbol=%s Vol=%.2f Ticket=%I64u",
                   cmdId, action, symbol, volume, ticket);
+                  
+      // Normalize SL/TP to instrument digits
+      int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+      if(digits > 0)
+      {
+         if(sl > 0.0) sl = NormalizeDouble(sl, digits);
+         if(tp > 0.0) tp = NormalizeDouble(tp, digits);
+      }
+      
+      // Dynamically configure filling mode for target symbol
+      g_trade.SetTypeFillingBySymbol(symbol);
                   
       if(action == "BUY")
       {

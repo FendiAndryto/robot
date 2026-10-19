@@ -24,7 +24,9 @@ class BridgeService:
         self._is_kill_switch_active: bool = False
         self._kill_switch_reason: Optional[str] = None
         self._kill_switch_time: Optional[int] = None
-        self._kill_switch_user: Optional[str] = None
+        self._is_kill_switch_user: Optional[str] = None
+        self._previous_positions_map: dict = {}
+        self._previous_balance: Optional[float] = None
 
     def reset_state(self):
         """Reset internal state (primarily used for test isolation)."""
@@ -36,6 +38,8 @@ class BridgeService:
             self._kill_switch_reason = None
             self._kill_switch_time = None
             self._kill_switch_user = None
+            self._previous_positions_map.clear()
+            self._previous_balance = None
 
     def get_equity(self) -> Optional[float]:
         with self._lock:
@@ -58,16 +62,15 @@ class BridgeService:
             self._kill_switch_user = username
             # Put CLOSE_ALL at the head of commands so MT5 executes it immediately on next poll
             self._pending_commands.insert(0, kill_cmd)
+            closed_count = len(self._latest_payload.positions) if self._latest_payload else 0
 
-        # Dispatch Telegram emergency alert
+        # Dispatch structured Telegram emergency alert
         try:
             from app.services.telegram_service import telegram_service
-            telegram_service.send_message_background(
-                f"🚨 <b>EMERGENCY KILL SWITCH ENGAGED</b>\n\n"
-                f"<b>Reason:</b> <code>{reason}</code>\n"
-                f"<b>Operator:</b> <code>{username}</code>\n"
-                f"<b>Action:</b> Blanket CLOSE_ALL dispatched to MT5 terminal.\n"
-                f"<b>Status:</b> <b>TRADING ENGINE LOCKED OUT</b>"
+            telegram_service.send_kill_switch_alert_background(
+                reason=reason,
+                triggered_by=username,
+                closed_count=closed_count
             )
         except Exception:
             pass
@@ -113,13 +116,47 @@ class BridgeService:
 
     def process_heartbeat(self, payload: HeartbeatPayload) -> HeartbeatResponse:
         current_time = time.time()
+        closed_positions = []
+        balance_delta = 0.0
+
         with self._lock:
+            # Detect closed positions by comparing with previous positions
+            current_tickets = {pos.ticket for pos in payload.positions}
+            if self._previous_positions_map:
+                for old_ticket, old_pos in self._previous_positions_map.items():
+                    if old_ticket not in current_tickets:
+                        closed_positions.append(old_pos)
+
+            if self._previous_balance is not None:
+                balance_delta = round(payload.balance - self._previous_balance, 2)
+
+            self._previous_positions_map = {pos.ticket: pos for pos in payload.positions}
+            self._previous_balance = payload.balance
+
             self._latest_payload = payload
             self._last_received_time = current_time
             
             # Pop pending commands to return to EA
             commands_to_send = list(self._pending_commands)
             self._pending_commands.clear()
+
+        # Record closed trades into Daily Drawdown Tracker and dispatch Telegram alerts
+        if closed_positions:
+            try:
+                from app.services.autopilot_service import autopilot_service
+                from app.services.telegram_service import telegram_service
+
+                for pos in closed_positions:
+                    pnl = balance_delta if (len(closed_positions) == 1 and balance_delta != 0.0) else pos.pnl
+                    autopilot_service.record_closed_trade(pnl)
+                    telegram_service.send_trade_closed_alert_background(
+                        ticket=pos.ticket,
+                        symbol=pos.symbol,
+                        pnl=pnl,
+                        reason="TP / SL / Manual Close"
+                    )
+            except Exception:
+                pass
 
         return HeartbeatResponse(
             status="ok",
@@ -197,16 +234,14 @@ class BridgeService:
         # Dispatch Telegram trade alert
         try:
             from app.services.telegram_service import telegram_service
-            icon = "🟢" if action == "BUY" else "🔴" if action == "SELL" else "🔄"
-            telegram_service.send_message_background(
-                f"{icon} <b>ORDER QUEUED FOR MT5</b>\n\n"
-                f"<b>Action:</b> <b>{action}</b>\n"
-                f"<b>Symbol:</b> <code>{command.symbol or 'N/A'}</code>\n"
-                f"<b>Volume:</b> <code>{command.volume or 0.0} Lots</code>\n"
-                f"<b>SL:</b> <code>{command.sl or 'None'}</code> | <b>TP:</b> <code>{command.tp or 'None'}</code>\n"
-                f"<b>Ticket:</b> #{command.ticket or 'New Entry'}\n"
-                f"<b>Command ID:</b> <code>{cmd_id}</code>"
-            )
+            telegram_service.send_order_alert_background({
+                "action": action,
+                "symbol": command.symbol or "",
+                "volume": command.volume or 0.0,
+                "ticket": command.ticket or "",
+                "sl": command.sl or 0.0,
+                "tp": command.tp or 0.0
+            })
         except Exception:
             pass
 

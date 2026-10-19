@@ -271,5 +271,44 @@ export const api = {
       throw new Error(err.detail || 'Drawdown Guard reset failed');
     }
     return res.json();
+  },
+
+  // Telegram Notifications & Remote Alerts
+  async getTelegramStatus() {
+    const res = await fetch(`${API_BASE}/api/v1/telegram/status`, {
+      method: 'GET',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) {
+      throw new Error('Failed to retrieve Telegram status');
+    }
+    return res.json();
+  },
+
+  async sendTelegramTestAlert(message = null) {
+    const res = await fetch(`${API_BASE}/api/v1/telegram/test-alert`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(message ? { message } : {})
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to send test alert' }));
+      throw new Error(err.detail || 'Test alert delivery failed');
+    }
+    return res.json();
+  },
+
+  async toggleTelegram(enabled) {
+    const res = await fetch(`${API_BASE}/api/v1/telegram/toggle`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ enabled })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to toggle Telegram notifications' }));
+      throw new Error(err.detail || 'Failed to toggle Telegram notifications');
+    }
+    return res.json();
   }
 };
+

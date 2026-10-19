@@ -8,10 +8,8 @@ import {
   TrendingDown,
   ShieldAlert,
   Target,
-  Zap,
   Loader2,
   Clock,
-  Layers,
   Lock
 } from 'lucide-react';
 

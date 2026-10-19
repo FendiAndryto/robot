@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   ArrowUpRight,
   ArrowDownRight,
@@ -73,9 +73,10 @@ export default function OrderForm({
   // Apply calculated lot size into the volume field
   const applyCalculatedLot = () => {
     setVolume(calculation.clampedLot.toFixed(2));
+    const currSymbol = currency === 'USD' ? '$' : `${currency} `;
     setFeedback({
       type: 'success',
-      message: `Applied ${calculation.clampedLot.toFixed(2)} lots based on ${riskPercent}% risk ($${calculation.riskAmount.toFixed(2)}) & ${slPips} pips SL.`
+      message: `Applied ${calculation.clampedLot.toFixed(2)} lots based on ${riskPercent}% risk (${currSymbol}${calculation.riskAmount.toFixed(2)}) & ${slPips} pips SL.`
     });
   };
 

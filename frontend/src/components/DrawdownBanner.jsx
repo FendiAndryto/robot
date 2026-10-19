@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldAlert, RefreshCw, AlertTriangle, Unlock } from 'lucide-react';
+import { ShieldAlert, RefreshCw, Unlock } from 'lucide-react';
 
 export default function DrawdownBanner({
   reason,

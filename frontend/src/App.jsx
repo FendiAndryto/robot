@@ -19,7 +19,7 @@ export default function App() {
       try {
         const userData = await api.getMe();
         setUser(userData);
-      } catch (err) {
+      } catch {
         clearToken();
         setUser(null);
       } finally {

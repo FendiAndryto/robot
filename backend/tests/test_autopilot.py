@@ -148,3 +148,57 @@ def test_autopilot_auth_guards():
     # Reset without JWT -> 401
     resp = client.post("/api/v1/autopilot/reset-drawdown")
     assert resp.status_code == 401
+
+
+def test_closed_position_detection_and_pnl_accumulation():
+    autopilot_service.set_starting_equity_baseline(10000.0)
+
+    # 1. First heartbeat with an open position (Ticket 771122)
+    sample_pos = {
+        "ticket": 771122,
+        "symbol": "EURUSD",
+        "type": "BUY",
+        "volume": 0.10,
+        "open_price": 1.08500,
+        "current_price": 1.08700,
+        "sl": 1.08200,
+        "tp": 1.09000,
+        "pnl": 20.00,
+        "open_time": int(time.time()),
+        "magic": 778899
+    }
+    hb1 = client.post("/api/v1/bridge/heartbeat", json={
+        "account_number": 887766,
+        "server": "Demo",
+        "currency": "USD",
+        "balance": 10000.0,
+        "equity": 10020.0,
+        "floating_pnl": 20.0,
+        "positions": [sample_pos],
+        "open_positions": 1,
+        "timestamp": int(time.time())
+    })
+    assert hb1.status_code == 200
+
+    # 2. Second heartbeat where position 771122 is closed with +$150 profit
+    hb2 = client.post("/api/v1/bridge/heartbeat", json={
+        "account_number": 887766,
+        "server": "Demo",
+        "currency": "USD",
+        "balance": 10150.0,
+        "equity": 10150.0,
+        "floating_pnl": 0.0,
+        "positions": [],
+        "open_positions": 0,
+        "timestamp": int(time.time())
+    })
+    assert hb2.status_code == 200
+
+    # 3. Status must reflect closed trade in closed_daily_pnl and total_daily_pnl
+    status_resp = client.get("/api/v1/autopilot/status")
+    assert status_resp.status_code == 200
+    data = status_resp.json()
+    assert data["closed_daily_pnl"] == 150.0
+    assert data["total_daily_pnl"] == 150.0
+    assert data["daily_drawdown_amount"] == 0.0
+    assert data["daily_drawdown_percent"] == 0.0

@@ -52,16 +52,39 @@ class TelegramService:
             logger.error("Failed to deliver Telegram notification: %s", e)
             return False
 
-    def send_message_background(self, text: str, parse_mode: str = "HTML"):
-        """Fire-and-forget background notification task."""
+    def _run_in_background(self, coro):
+        """Execute a coroutine in background task if event loop is running, or in a worker thread."""
         if not self.is_enabled:
+            try:
+                coro.close()
+            except Exception:
+                pass
             return
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self.send_message(text, parse_mode))
+            loop.create_task(coro)
         except RuntimeError:
-            # If no running event loop, ignore or run synchronously if needed
-            pass
+            import threading
+            threading.Thread(target=lambda: asyncio.run(coro), daemon=True).start()
+
+    def send_message_background(self, text: str, parse_mode: str = "HTML"):
+        """Fire-and-forget background notification task."""
+        self._run_in_background(self.send_message(text, parse_mode))
+
+    def send_signal_alert_background(self, signal: Dict[str, Any]):
+        self._run_in_background(self.send_signal_alert(signal))
+
+    def send_order_alert_background(self, order: Dict[str, Any]):
+        self._run_in_background(self.send_order_alert(order))
+
+    def send_kill_switch_alert_background(self, reason: str, triggered_by: str = "Admin", closed_count: int = 0):
+        self._run_in_background(self.send_kill_switch_alert(reason, triggered_by, closed_count))
+
+    def send_drawdown_lockout_alert_background(self, drawdown_percent: float, drawdown_amount: float, limit_percent: float):
+        self._run_in_background(self.send_drawdown_lockout_alert(drawdown_percent, drawdown_amount, limit_percent))
+
+    def send_trade_closed_alert_background(self, ticket: int, symbol: str, pnl: float, reason: str = "Target / Stop / Manual"):
+        self._run_in_background(self.send_trade_closed_alert(ticket, symbol, pnl, reason))
 
     async def send_signal_alert(self, signal: Dict[str, Any]) -> bool:
         action = signal.get("action", "SIGNAL")

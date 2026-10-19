@@ -36,13 +36,14 @@ const formatCurrency = (val, currency = 'USD') => {
 
 export default function Dashboard({ user, onLogout }) {
   const [bridgeStatus, setBridgeStatus] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [pollInterval, setPollInterval] = useState(1000);
   const [signals, setSignals] = useState([]);
   const [autopilotStatus, setAutopilotStatus] = useState(null);
   const [isResettingDrawdown, setIsResettingDrawdown] = useState(false);
   const [isKillSwitchModalOpen, setIsKillSwitchModalOpen] = useState(false);
   const [isUnlockingEngine, setIsUnlockingEngine] = useState(false);
+  const [isTestingTelegram, setIsTestingTelegram] = useState(false);
+  const [telegramStatusMsg, setTelegramStatusMsg] = useState(null);
   const timerRef = useRef(null);
 
   const fetchSignals = async () => {
@@ -67,7 +68,7 @@ export default function Dashboard({ user, onLogout }) {
     try {
       const data = await api.getBridgeStatus();
       setBridgeStatus(data);
-    } catch (err) {
+    } catch {
       // In case backend is unreachable or returns error
       setBridgeStatus((prev) => ({
         ...prev,
@@ -75,8 +76,6 @@ export default function Dashboard({ user, onLogout }) {
         terminal_connected: false,
         seconds_since_last_heartbeat: null
       }));
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -131,6 +130,23 @@ export default function Dashboard({ user, onLogout }) {
       console.error('Failed to reset Drawdown Guard:', err);
     } finally {
       setIsResettingDrawdown(false);
+    }
+  };
+
+  const handleTestTelegram = async () => {
+    setIsTestingTelegram(true);
+    setTelegramStatusMsg(null);
+    try {
+      const res = await api.sendTelegramTestAlert();
+      if (res.delivered) {
+        setTelegramStatusMsg({ type: 'success', text: 'Telegram alert sent successfully!' });
+      } else {
+        setTelegramStatusMsg({ type: 'warning', text: 'Telegram bot not configured or disabled.' });
+      }
+    } catch (err) {
+      setTelegramStatusMsg({ type: 'error', text: err.message || 'Telegram test failed.' });
+    } finally {
+      setIsTestingTelegram(false);
     }
   };
 
@@ -397,6 +413,34 @@ export default function Dashboard({ user, onLogout }) {
             <div className="telemetry-item">
               <div className="telemetry-item-label">Base Currency</div>
               <div className="telemetry-item-val">{currency}</div>
+            </div>
+
+            <div className="telemetry-item">
+              <div className="telemetry-item-label">Last Telemetry Timestamp</div>
+              <div className="telemetry-item-val">
+                {lastHeartbeatAt ? new Date(lastHeartbeatAt * 1000).toLocaleTimeString() : 'N/A'}
+              </div>
+            </div>
+
+            <div className="telemetry-item">
+              <div className="telemetry-item-label">Telegram Bridge</div>
+              <div className="telemetry-item-val" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={handleTestTelegram}
+                  disabled={isTestingTelegram}
+                  className="btn-logout"
+                  style={{ fontSize: '0.75rem', padding: '4px 10px', height: 'auto' }}
+                  id="test-telegram-alert-btn"
+                >
+                  {isTestingTelegram ? 'Testing...' : 'Send Test Alert'}
+                </button>
+                {telegramStatusMsg && (
+                  <span style={{ fontSize: '0.72rem', color: telegramStatusMsg.type === 'success' ? 'var(--accent-emerald)' : 'var(--accent-amber)' }}>
+                    {telegramStatusMsg.text}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         </section>

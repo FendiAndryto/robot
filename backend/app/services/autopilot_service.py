@@ -156,11 +156,10 @@ class AutoPilotService:
                 # Dispatch Telegram alert
                 try:
                     from app.services.telegram_service import telegram_service
-                    telegram_service.send_message_background(
-                        f"⛔ <b>DAILY DRAWDOWN GUARD BREACHED</b>\n\n"
-                        f"<b>Drawdown:</b> <code>-{dd_percent:.2f}% (${dd_amount:,.2f})</code>\n"
-                        f"<b>Risk Ceiling:</b> <code>{settings.MAX_DAILY_DRAWDOWN_PERCENT:.1f}%</code>\n"
-                        f"<b>Safety Action:</b> Auto-Pilot Disabled & Trading Halted for Safety"
+                    telegram_service.send_drawdown_lockout_alert_background(
+                        drawdown_percent=dd_percent,
+                        drawdown_amount=dd_amount,
+                        limit_percent=settings.MAX_DAILY_DRAWDOWN_PERCENT
                     )
                 except Exception:
                     pass
