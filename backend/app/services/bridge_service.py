@@ -38,6 +38,7 @@ class BridgeService:
             if self._last_received_time is None or self._latest_payload is None:
                 return BridgeStatusResponse(
                     is_connected=False,
+                    terminal_connected=False,
                     last_heartbeat_at=None,
                     seconds_since_last_heartbeat=None,
                     metrics=None
@@ -48,7 +49,7 @@ class BridgeService:
             
             return BridgeStatusResponse(
                 is_connected=is_active,
-                terminal_connected=self._latest_payload.terminal_connected,
+                terminal_connected=self._latest_payload.terminal_connected if is_active else False,
                 last_heartbeat_at=int(self._last_received_time),
                 seconds_since_last_heartbeat=round(diff, 2),
                 metrics=self._latest_payload

@@ -13,6 +13,9 @@
 #define INTERNET_SERVICE_HTTP        3
 #define INTERNET_FLAG_RELOAD         0x80000000
 #define INTERNET_FLAG_SECURE         0x00800000
+#define INTERNET_OPTION_CONNECT_TIMEOUT 2
+#define INTERNET_OPTION_RECEIVE_TIMEOUT 6
+#define INTERNET_OPTION_SEND_TIMEOUT    5
 
 #import "wininet.dll"
   long InternetOpenW(string lpszAgent, uint dwAccessType, string lpszProxy, string lpszProxyBypass, uint dwFlags);
@@ -20,6 +23,7 @@
   long HttpOpenRequestW(long hConnect, string lpszVerb, string lpszObjectName, string lpszVersion, string lpszReferer, long lplpszAcceptTypes, uint dwFlags, long dwContext);
   bool HttpSendRequestW(long hRequest, string lpszHeaders, uint dwHeadersLength, uchar &lpOptional[], uint dwOptionalLength);
   bool InternetReadFile(long hFile, uchar &lpBuffer[], uint dwNumberOfBytesToRead, uint &lpdwNumberOfBytesRead);
+  bool InternetSetOptionW(long hInternet, uint dwOption, uint &lpBuffer, uint dwBufferLength);
   bool InternetCloseHandle(long hInternet);
 #import
 
@@ -129,6 +133,12 @@ bool SendWinInetPost(string host, ushort port, bool useSSL, string path, string 
       return false;
    }
    
+   // Set WinINet timeouts (2s) to prevent blocking the EA thread if backend is unreachable
+   uint timeoutMs = 2000;
+   InternetSetOptionW(hSession, INTERNET_OPTION_CONNECT_TIMEOUT, timeoutMs, 4);
+   InternetSetOptionW(hSession, INTERNET_OPTION_RECEIVE_TIMEOUT, timeoutMs, 4);
+   InternetSetOptionW(hSession, INTERNET_OPTION_SEND_TIMEOUT, timeoutMs, 4);
+   
    long hConnect = InternetConnectW(hSession, host, port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
    if(hConnect == 0)
    {
@@ -184,27 +194,56 @@ bool SendWinInetPost(string host, ushort port, bool useSSL, string path, string 
 }
 
 //+------------------------------------------------------------------+
+//| Escape special characters for strict JSON compliance             |
+//+------------------------------------------------------------------+
+string EscapeJsonString(string src)
+{
+   string res = src;
+   StringReplace(res, "\\", "\\\\");
+   StringReplace(res, "\"", "\\\"");
+   StringReplace(res, "\r", "\\r");
+   StringReplace(res, "\n", "\\n");
+   StringReplace(res, "\t", "\\t");
+   return res;
+}
+
+//+------------------------------------------------------------------+
 //| Build JSON telemetry payload from native MT5 account functions   |
 //+------------------------------------------------------------------+
 string BuildHeartbeatJson()
 {
    long login = AccountInfoInteger(ACCOUNT_LOGIN);
-   string server = AccountInfoString(ACCOUNT_SERVER);
-   string currency = AccountInfoString(ACCOUNT_CURRENCY);
+   string server = EscapeJsonString(AccountInfoString(ACCOUNT_SERVER));
+   string currency = EscapeJsonString(AccountInfoString(ACCOUNT_CURRENCY));
    if(currency == "") currency = "USD";
    
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   if(!MathIsValidNumber(balance)) balance = 0.0;
+   
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(!MathIsValidNumber(equity)) equity = balance;
+   
    double margin = AccountInfoDouble(ACCOUNT_MARGIN);
+   if(!MathIsValidNumber(margin) || margin < 0.0) margin = 0.0;
+   
    double free_margin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
-   double margin_level = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+   if(!MathIsValidNumber(free_margin)) free_margin = equity;
+   
+   double margin_level = 0.0;
+   if(margin > 0.0001)
+   {
+      margin_level = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+      if(!MathIsValidNumber(margin_level)) margin_level = 0.0;
+   }
+   
    double profit = AccountInfoDouble(ACCOUNT_PROFIT);
+   if(!MathIsValidNumber(profit)) profit = 0.0;
+   
    bool connected = (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
    int positions = PositionsTotal();
-   long timestamp = (long)TimeCurrent();
    
-   // Escape double quotes in server name if present
-   StringReplace(server, "\"", "\\\"");
+   // Use TimeLocal() so timestamp advances even when market quotes are idle/closed
+   long timestamp = (long)TimeLocal();
 
    string json = StringFormat(
       "{\"account_number\":%I64d,\"server\":\"%s\",\"currency\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"margin\":%.2f,\"free_margin\":%.2f,\"margin_level\":%.2f,\"floating_pnl\":%.2f,\"terminal_connected\":%s,\"open_positions\":%d,\"timestamp\":%I64d}",
@@ -252,7 +291,7 @@ void SendHeartbeat()
    
    if(res == 200)
    {
-      g_last_heartbeat = TimeCurrent();
+      g_last_heartbeat = TimeLocal();
       g_consecutive_errors = 0;
       g_status_msg = "Connected (Heartbeat OK - 200)";
       
@@ -274,7 +313,7 @@ void SendHeartbeat()
    string wininetResp;
    if(SendWinInetPost(host, port, useSSL, "/api/v1/bridge/heartbeat", json, wininetResp))
    {
-      g_last_heartbeat = TimeCurrent();
+      g_last_heartbeat = TimeLocal();
       g_consecutive_errors = 0;
       g_status_msg = "Connected (WinINet Heartbeat OK)";
       
