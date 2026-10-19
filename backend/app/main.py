@@ -6,6 +6,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.risk import router as risk_router
 from app.api.v1.strategy import router as strategy_router
 from app.api.v1.autopilot import router as autopilot_router
+from app.api.v1.telegram import router as telegram_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -30,6 +31,7 @@ app.include_router(bridge_router, prefix=settings.API_V1_STR)
 app.include_router(risk_router, prefix=settings.API_V1_STR)
 app.include_router(strategy_router, prefix=settings.API_V1_STR)
 app.include_router(autopilot_router, prefix=settings.API_V1_STR)
+app.include_router(telegram_router, prefix=settings.API_V1_STR)
 
 
 @app.get("/", tags=["Root"])

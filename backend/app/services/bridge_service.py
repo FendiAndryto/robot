@@ -59,6 +59,19 @@ class BridgeService:
             # Put CLOSE_ALL at the head of commands so MT5 executes it immediately on next poll
             self._pending_commands.insert(0, kill_cmd)
 
+        # Dispatch Telegram emergency alert
+        try:
+            from app.services.telegram_service import telegram_service
+            telegram_service.send_message_background(
+                f"🚨 <b>EMERGENCY KILL SWITCH ENGAGED</b>\n\n"
+                f"<b>Reason:</b> <code>{reason}</code>\n"
+                f"<b>Operator:</b> <code>{username}</code>\n"
+                f"<b>Action:</b> Blanket CLOSE_ALL dispatched to MT5 terminal.\n"
+                f"<b>Status:</b> <b>TRADING ENGINE LOCKED OUT</b>"
+            )
+        except Exception:
+            pass
+
         return {
             "status": "engaged",
             "is_kill_switch_active": True,
@@ -180,6 +193,22 @@ class BridgeService:
         if command.ticket:
             msg += f" (Ticket #{command.ticket})"
         msg += " queued for MT5 execution."
+
+        # Dispatch Telegram trade alert
+        try:
+            from app.services.telegram_service import telegram_service
+            icon = "🟢" if action == "BUY" else "🔴" if action == "SELL" else "🔄"
+            telegram_service.send_message_background(
+                f"{icon} <b>ORDER QUEUED FOR MT5</b>\n\n"
+                f"<b>Action:</b> <b>{action}</b>\n"
+                f"<b>Symbol:</b> <code>{command.symbol or 'N/A'}</code>\n"
+                f"<b>Volume:</b> <code>{command.volume or 0.0} Lots</code>\n"
+                f"<b>SL:</b> <code>{command.sl or 'None'}</code> | <b>TP:</b> <code>{command.tp or 'None'}</code>\n"
+                f"<b>Ticket:</b> #{command.ticket or 'New Entry'}\n"
+                f"<b>Command ID:</b> <code>{cmd_id}</code>"
+            )
+        except Exception:
+            pass
 
         return OrderResponse(
             status="queued",

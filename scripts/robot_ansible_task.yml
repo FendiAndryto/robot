@@ -1,0 +1,59 @@
+# ==========================================
+# PROJECT: ROBOT TRADING (MT5 DOCKER + FASTAPI + REACT)
+# ==========================================
+- name: "Ambil alih ownership folder robot-app dari root ke fendi"
+  ansible.builtin.file:
+    path: /home/fendi/my-apps/robot-app
+    state: directory
+    owner: fendi
+    group: fendi
+    mode: "0755"
+  become: yes
+
+- name: "Request repo Robot dari GitHub"
+  ansible.builtin.git:
+    repo: '{{ robot_git_repo | default("https://github.com/FendiAndryto/robot.git") }}'
+    dest: /home/fendi/my-apps/robot-app
+    version: '{{ robot_git_branch | default("main") }}'
+    force: yes
+  register: status_git_robot
+  become: false
+
+- name: "Bantai file ampas yang gak ada di Git"
+  ansible.builtin.shell: "git clean -fd"
+  args:
+    chdir: /home/fendi/my-apps/robot-app
+  register: status_clean_robot
+  changed_when: "status_clean_robot.stdout != ''"
+  become: false
+
+- name: "Build .env Docker Compose Robot"
+  ansible.builtin.copy:
+    dest: /home/fendi/my-apps/robot-app/docker/.env
+    content: |
+      MT5_VNC_PORT={{ robot_mt5_vnc_port | default('8088') }}
+      MT5_RPYC_PORT={{ robot_mt5_rpyc_port | default('8081') }}
+      MT5_VNC_USER={{ robot_mt5_vnc_user | default('fendi') }}
+      MT5_VNC_PASSWORD={{ robot_mt5_vnc_pass | default('fendi123') }}
+      BRIDGE_API_PORT={{ robot_backend_port | default('8089') }}
+      FRONTEND_PORT={{ robot_frontend_port | default('3000') }}
+      SECRET_KEY={{ robot_secret_key | default('change-me-to-a-secure-random-32-byte-hex') }}
+      ADMIN_USERNAME={{ robot_admin_username | default('admin') }}
+      ADMIN_PASSWORD={{ robot_admin_password | default('change_this_password') }}
+      ALLOWED_HOSTS={{ robot_allowed_hosts | default('*') }}
+      CORS_ORIGINS={{ robot_cors_origins | default('') }}
+      TELEGRAM_BOT_TOKEN={{ robot_telegram_bot_token | default('') }}
+      TELEGRAM_CHAT_ID={{ robot_telegram_chat_id | default('') }}
+      TELEGRAM_NOTIFICATIONS_ENABLED={{ robot_telegram_enabled | default('true') }}
+      MAX_DAILY_DRAWDOWN_PERCENT={{ robot_max_daily_drawdown | default('3.0') }}
+      DEFAULT_RISK_PER_TRADE_PERCENT={{ robot_risk_per_trade | default('1.0') }}
+      AUTOPILOT_DEFAULT_ENABLED={{ robot_autopilot_enabled | default('false') }}
+    mode: "0600"
+  register: status_env_robot
+  become: false
+
+- name: "Docker Compose Build & Up Robot Trading MT5"
+  community.docker.docker_compose_v2:
+    project_src: /home/fendi/my-apps/robot-app/docker
+    state: present
+    build: "{{ 'always' if (status_git_robot.changed or status_env_robot.changed or status_clean_robot.changed) else 'policy' }}"

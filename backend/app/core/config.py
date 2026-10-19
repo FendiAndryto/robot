@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     AUTOPILOT_DEFAULT_ENABLED: bool = False
     AUTOPILOT_MAX_DAILY_TRADES: int = 20
     AUTOPILOT_RESET_HOUR_UTC: int = 0
+
+    # Telegram Push Notifications
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHAT_ID: str = ""
+    TELEGRAM_NOTIFICATIONS_ENABLED: bool = True
     
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

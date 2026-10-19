@@ -153,6 +153,18 @@ class AutoPilotService:
                     f"Daily Drawdown Breach: -{dd_percent:.2f}% equity loss exceeds maximum allowed safety threshold of {settings.MAX_DAILY_DRAWDOWN_PERCENT:.1f}%."
                 )
 
+                # Dispatch Telegram alert
+                try:
+                    from app.services.telegram_service import telegram_service
+                    telegram_service.send_message_background(
+                        f"⛔ <b>DAILY DRAWDOWN GUARD BREACHED</b>\n\n"
+                        f"<b>Drawdown:</b> <code>-{dd_percent:.2f}% (${dd_amount:,.2f})</code>\n"
+                        f"<b>Risk Ceiling:</b> <code>{settings.MAX_DAILY_DRAWDOWN_PERCENT:.1f}%</code>\n"
+                        f"<b>Safety Action:</b> Auto-Pilot Disabled & Trading Halted for Safety"
+                    )
+                except Exception:
+                    pass
+
             return AutoPilotStatusResponse(
                 is_autopilot_active=self._is_autopilot_active and not self._is_drawdown_lockout_active,
                 is_drawdown_lockout_active=self._is_drawdown_lockout_active,

@@ -294,13 +294,29 @@ class StrategyEngine:
 
         # Autonomous Auto-Pilot Execution Hook
         from app.services.autopilot_service import autopilot_service
-        if autopilot_service.is_autopilot_active() and not autopilot_service.is_drawdown_locked():
+        is_auto_active = autopilot_service.is_autopilot_active() and not autopilot_service.is_drawdown_locked()
+        if is_auto_active:
             try:
                 self.approve_signal(signal_id)
                 autopilot_service.increment_auto_executed_count()
                 signal.reason += " [AUTOPILOT AUTO-EXECUTED]"
             except Exception:
                 pass
+
+        # Dispatch Telegram signal alert
+        try:
+            from app.services.telegram_service import telegram_service
+            telegram_service.send_message_background(
+                f"{'🟢' if signal.action == 'BUY' else '🔴'} <b>TECHNICAL SIGNAL DETECTED</b>\n\n"
+                f"<b>Pair:</b> <code>{signal.symbol}</code>\n"
+                f"<b>Action:</b> <b>{signal.action}</b>\n"
+                f"<b>Entry:</b> <code>{signal.entry_price:.5f}</code>\n"
+                f"<b>SL:</b> <code>{signal.sl:.5f}</code> | <b>TP:</b> <code>{signal.tp:.5f}</code> (R:R {signal.risk_reward})\n"
+                f"<b>Recommended Lot:</b> <code>{signal.recommended_lot:.2f} Lots</code>\n"
+                f"<b>Mode:</b> {'⚡ Auto-Pilot (Auto-Executed)' if is_auto_active else '👤 Semi-Auto Approval Pending'}"
+            )
+        except Exception:
+            pass
 
         return signal
 
