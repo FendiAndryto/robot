@@ -23,6 +23,7 @@ const formatCurrency = (val, currency = 'USD') => {
 
 export default function HomeTab({
   bridgeStatus,
+  autopilotStatus,
   onOpenNewTrade,
   onNavigateJournal,
   onNavigateAI,
@@ -32,6 +33,7 @@ export default function HomeTab({
   const [chartRange, setChartRange] = useState('1M');
   const [closingTicket, setClosingTicket] = useState(null);
   const [equityCurveData, setEquityCurveData] = useState(null);
+  const [historyData, setHistoryData] = useState(null);
 
   const metrics = bridgeStatus?.metrics || {};
   const isConnected = bridgeStatus?.is_connected || false;
@@ -44,15 +46,24 @@ export default function HomeTab({
   const marketQuotes = bridgeStatus?.market_quotes || [];
 
   React.useEffect(() => {
-    const fetchCurve = async () => {
+    let isMounted = true;
+    const fetchData = async () => {
       try {
-        const data = await api.getEquityCurve();
-        setEquityCurveData(data);
+        const [curve, history] = await Promise.all([
+          api.getEquityCurve().catch(() => null),
+          api.getTradeHistory().catch(() => null)
+        ]);
+        if (!isMounted) return;
+        if (curve) setEquityCurveData(curve);
+        if (history) setHistoryData(history);
       } catch {
         // Ignore transient error
       }
     };
-    fetchCurve();
+    fetchData();
+    return () => {
+      isMounted = false;
+    };
   }, [bridgeStatus]);
 
   const handleClosePosition = async (ticket) => {
@@ -445,19 +456,49 @@ export default function HomeTab({
       </div>
       <div className="grid three">
         <div className="card">
-          <div className="metric">64.8%</div>
+          <div className="metric">
+            {historyData && historyData.total_trades > 0
+              ? `${historyData.win_rate.toFixed(1)}%`
+              : '0.0%'}
+          </div>
           <div className="label">Win Rate</div>
-          <div className="tiny">Sample 125 trades</div>
+          <div className="tiny">
+            {historyData && historyData.total_trades > 0
+              ? `${historyData.total_trades} trades (${historyData.winning_trades}W / ${historyData.losing_trades}L)`
+              : 'No closed trades yet'}
+          </div>
         </div>
         <div className="card">
-          <div className="metric">1.72</div>
+          <div className="metric">
+            {historyData && historyData.total_trades > 0
+              ? (historyData.profit_factor > 0 ? historyData.profit_factor.toFixed(2) : (historyData.gross_loss === 0 ? '∞' : '0.00'))
+              : '0.00'}
+          </div>
           <div className="label">Profit Factor</div>
-          <div className="tiny">Risk-adjusted return</div>
+          <div className="tiny">
+            {historyData && historyData.total_trades > 0
+              ? `Gross: +$${historyData.gross_profit?.toFixed(2) ?? '0.00'} / -$${historyData.gross_loss?.toFixed(2) ?? '0.00'}`
+              : 'Gross PnL ratio'}
+          </div>
         </div>
         <div className="card">
-          <div className="metric negative">−4.6%</div>
-          <div className="label">Max Drawdown</div>
-          <div className="tiny">Within 3% daily guard buffer</div>
+          {(() => {
+            const ddPct = autopilotStatus?.daily_drawdown_percent ?? (
+              balance > 0 && equity < balance ? ((balance - equity) / balance) * 100 : 0
+            );
+            const isNegative = ddPct > 0;
+            return (
+              <>
+                <div className={`metric ${isNegative ? 'negative' : ''}`}>
+                  {isNegative ? `−${ddPct.toFixed(2)}%` : '0.0%'}
+                </div>
+                <div className="label">Daily Drawdown</div>
+                <div className="tiny">
+                  Guard limit: {autopilotStatus?.max_daily_drawdown_percent ?? 3.0}% max buffer
+                </div>
+              </>
+            );
+          })()}
         </div>
       </div>
     </div>

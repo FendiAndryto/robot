@@ -170,6 +170,7 @@ class StrategyEngine:
         signal_id = f"sig_{current_time}_{sym.lower()}_{action.lower()}_{uuid.uuid4().hex[:4]}"
         signal = SignalItem(
             signal_id=signal_id,
+            id=signal_id,
             symbol=sym,
             action=action,
             entry_price=round(price_now, 5),
@@ -284,6 +285,7 @@ class StrategyEngine:
         signal_id = f"sig_{current_time}_{sym.lower()}_{action.lower()}_{uuid.uuid4().hex[:4]}"
         signal = SignalItem(
             signal_id=signal_id,
+            id=signal_id,
             symbol=sym,
             action=action,
             entry_price=round(entry_price, 5),
@@ -357,6 +359,11 @@ class StrategyEngine:
         with self._lock:
             signal = self._signals.get(signal_id)
             if not signal:
+                for s in self._signals.values():
+                    if getattr(s, "id", None) == signal_id or s.signal_id == signal_id:
+                        signal = s
+                        break
+            if not signal:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Signal with ID '{signal_id}' not found."
@@ -401,6 +408,11 @@ class StrategyEngine:
     def dismiss_signal(self, signal_id: str, reason: str = "Manual dismissal") -> dict:
         with self._lock:
             signal = self._signals.get(signal_id)
+            if not signal:
+                for s in self._signals.values():
+                    if getattr(s, "id", None) == signal_id or s.signal_id == signal_id:
+                        signal = s
+                        break
             if not signal:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,

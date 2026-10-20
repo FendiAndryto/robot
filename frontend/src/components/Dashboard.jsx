@@ -188,6 +188,7 @@ export default function Dashboard({ user, onLogout }) {
         <div className={`page-container ${activeTab === 'home' ? 'active' : ''}`} id="tab-home">
           <HomeTab
             bridgeStatus={bridgeStatus}
+            autopilotStatus={autopilotStatus}
             onOpenNewTrade={() => setIsOrderDrawerOpen(true)}
             onNavigateJournal={() => setActiveTab('journal')}
             onNavigateAI={() => setActiveTab('ai')}

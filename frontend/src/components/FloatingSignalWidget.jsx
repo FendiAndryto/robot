@@ -25,6 +25,7 @@ export default function FloatingSignalWidget({
   const signalCount = signals.length;
 
   const handleApprove = async (signalId) => {
+    if (!signalId) return;
     setApprovingId(signalId);
     setFeedback(null);
     try {
@@ -40,11 +41,15 @@ export default function FloatingSignalWidget({
   };
 
   const handleDismiss = async (signalId) => {
+    if (!signalId) return;
+    setFeedback(null);
     try {
       await api.dismissSignal(signalId);
+      setFeedback({ type: 'success', text: 'Signal dismissed' });
       if (onRefreshSignals) onRefreshSignals();
     } catch (err) {
       console.error('Failed to dismiss signal:', err);
+      setFeedback({ type: 'error', text: err.message || 'Failed to dismiss signal' });
     }
   };
 
@@ -155,10 +160,12 @@ export default function FloatingSignalWidget({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {signals.length > 0 ? (
               signals.map((sig, idx) => {
+                const sigId = sig.signal_id || sig.id;
                 const isBuy = sig.action === 'BUY';
+                const lot = sig.recommended_lot || sig.volume || 0.01;
                 return (
                   <div
-                    key={sig.id || `signal-${idx}`}
+                    key={sigId || `signal-${idx}`}
                     style={{
                       background: '#0e181f',
                       border: '1px solid var(--line)',
@@ -170,7 +177,7 @@ export default function FloatingSignalWidget({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <span style={{ fontWeight: 800, fontSize: '13px' }}>{sig.symbol}</span>
                         <span className={`tag ${isBuy ? '' : 'red'}`} style={{ fontSize: '9px' }}>
-                          {sig.action} {sig.volume || '0.01'} lot
+                          {sig.action} {lot} lot
                         </span>
                       </div>
                       <span className="tiny" style={{ color: 'var(--muted)' }}>
@@ -178,26 +185,34 @@ export default function FloatingSignalWidget({
                       </span>
                     </div>
 
-                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', marginBottom: '8px' }}>
-                      {sig.reason || 'EMA 20/50 Cross + RSI Confluence'}
+                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', marginBottom: '4px' }}>
+                      {sig.reason || 'EMA 9/21 Cross + RSI Momentum'}
                     </div>
+
+                    {(sig.entry_price || sig.sl || sig.tp) && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: 'var(--muted)', marginBottom: '8px' }}>
+                        <span>Entry: <strong style={{ color: 'var(--text)' }}>{sig.entry_price ? sig.entry_price.toFixed(sig.symbol?.includes('XAU') ? 2 : (sig.symbol?.includes('JPY') ? 3 : 5)) : '-'}</strong></span>
+                        <span>SL: <strong style={{ color: 'var(--red)' }}>{sig.sl ? sig.sl.toFixed(sig.symbol?.includes('XAU') ? 2 : (sig.symbol?.includes('JPY') ? 3 : 5)) : '-'}</strong></span>
+                        <span>TP: <strong style={{ color: 'var(--g)' }}>{sig.tp ? sig.tp.toFixed(sig.symbol?.includes('XAU') ? 2 : (sig.symbol?.includes('JPY') ? 3 : 5)) : '-'}</strong></span>
+                      </div>
+                    )}
 
                     <div style={{ display: 'flex', gap: '6px' }}>
                       <button
                         type="button"
                         className="btn"
                         style={{ flex: 1, padding: '6px 8px', fontSize: '10.5px' }}
-                        onClick={() => handleApprove(sig.id)}
-                        disabled={approvingId === sig.id || isKillSwitchActive}
+                        onClick={() => handleApprove(sigId)}
+                        disabled={approvingId === sigId || isKillSwitchActive}
                       >
                         <CheckCircle2 size={12} />
-                        <span>{approvingId === sig.id ? 'Executing...' : 'Approve'}</span>
+                        <span>{approvingId === sigId ? 'Executing...' : 'Approve'}</span>
                       </button>
                       <button
                         type="button"
                         className="btn alt"
                         style={{ padding: '6px 8px', fontSize: '10.5px' }}
-                        onClick={() => handleDismiss(sig.id)}
+                        onClick={() => handleDismiss(sigId)}
                       >
                         <XCircle size={12} />
                         <span>Dismiss</span>

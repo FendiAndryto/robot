@@ -20,6 +20,7 @@ class IndicatorValues(BaseModel):
 
 class SignalItem(BaseModel):
     signal_id: str
+    id: Optional[str] = None
     symbol: str
     action: str  # "BUY" or "SELL"
     entry_price: float
