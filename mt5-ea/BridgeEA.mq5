@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Robot Trading System"
 #property link      "https://github.com/FendiAndryto/robot"
-#property version   "1.50"
-#property description "FastAPI Web-to-MT5 Telemetry & Scalping Protection EA v1.50"
+#property version   "1.60"
+#property description "FastAPI Web-to-MT5 Telemetry & Scalping Protection EA v1.60"
 
 //--- Standard MT5 Trade Library
 #include <Trade\Trade.mqh>
@@ -74,9 +74,12 @@ void GetDealPositionOpenDetails(ulong posId, double &openPrice, long &openTime);
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(">>> [BridgeEA] Initializing MT5 FastAPI Bridge EA v1.50 (Scalping Protection & Multi-TF)...");
+   Print(">>> [BridgeEA] Initializing MT5 FastAPI Bridge EA v1.60 (Pip-Aware Protection & Entry History Fix)...");
    Print(">>> [BridgeEA] Target Backend: ", InpBackendUrl);
    PrintFormat(">>> [BridgeEA] Magic Number: %I64u, Deviation: %I64u pts", InpMagicNumber, InpDeviationPoints);
+   PrintFormat(">>> [BridgeEA] Protection: BEP=%s (Trig=%d pips, Buf=%d pips) | Trailing=%s (Dist=%d pips, Step=%d pips)",
+               (InpEnableBEP ? "ON" : "OFF"), InpBEPTriggerPips, InpBEPBufferPips,
+               (InpEnableTrailing ? "ON" : "OFF"), InpTrailingDistPips, InpTrailingStepPips);
    
    // Configure trade executor
    g_trade.SetExpertMagicNumber(InpMagicNumber);
