@@ -2,43 +2,15 @@ import React, { useState } from 'react';
 import {
   Monitor,
   X,
-  ExternalLink,
   CheckCircle2,
   AlertTriangle,
   RefreshCw,
-  KeyRound,
-  Server,
-  Settings2
+  Cpu,
+  Laptop,
+  Check,
+  ShieldCheck,
+  Zap
 } from 'lucide-react';
-
-const getDefaultVncUrl = () => {
-  if (import.meta.env.VITE_MT5_VNC_URL) {
-    return import.meta.env.VITE_MT5_VNC_URL;
-  }
-  if (typeof window === 'undefined') return 'http://localhost:8088';
-
-  const host = window.location.hostname;
-  // Local development or direct IP
-  if (host === 'localhost' || host === '127.0.0.1' || /^(\d+\.){3}\d+$/.test(host)) {
-    return `${window.location.protocol}//${host}:8088`;
-  }
-  // Staging deployment
-  if (host.includes('staging-trade-gear.homever.my.id')) {
-    return 'https://staging-mt5.homever.my.id';
-  }
-  // Production deployment
-  if (host.includes('trade-gear.homever.my.id')) {
-    return 'https://mt5.trade-gear.homever.my.id';
-  }
-  // Fallback for custom homever.my.id subdomains
-  if (host.endsWith('homever.my.id')) {
-    if (host.startsWith('staging-')) {
-      return 'https://staging-mt5.homever.my.id';
-    }
-    return 'https://mt5.trade-gear.homever.my.id';
-  }
-  return `${window.location.protocol}//${host}:8088`;
-};
 
 export default function Mt5ConnectModal({
   isOpen,
@@ -47,37 +19,12 @@ export default function Mt5ConnectModal({
   accountNumber,
   onCheckStatus
 }) {
-  const defaultUrl = getDefaultVncUrl();
-
-  const [vncUrl, setVncUrl] = useState(() => {
-    const saved = localStorage.getItem('robot_mt5_vnc_url');
-    // Sanitize stale URL with port :8088 on public domain that causes timeouts
-    if (
-      saved &&
-      saved.includes(':8088') &&
-      !saved.includes('localhost') &&
-      !saved.includes('127.0.0.1') &&
-      !/(\d+\.){3}\d+/.test(saved)
-    ) {
-      const fresh = getDefaultVncUrl();
-      localStorage.setItem('robot_mt5_vnc_url', fresh);
-      return fresh;
-    }
-    return saved || defaultUrl;
-  });
-  const [showConfig, setShowConfig] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleOpenVnc = () => {
-    window.open(vncUrl, '_blank', 'noopener,noreferrer');
-  };
-
-  const handleSaveUrl = (newUrl) => {
-    setVncUrl(newUrl);
-    localStorage.setItem('robot_mt5_vnc_url', newUrl);
-  };
+  const bridgeUrl = typeof window !== 'undefined' ? window.location.origin : 'https://staging-trade-gear.homever.my.id';
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -90,6 +37,12 @@ export default function Mt5ConnectModal({
     }
   };
 
+  const handleCopyUrl = () => {
+    navigator.clipboard.writeText(bridgeUrl);
+    setCopiedUrl(true);
+    setTimeout(() => setCopiedUrl(false), 2000);
+  };
+
   return (
     <div className="modal-backdrop animate-fade-in" id="mt5-connect-modal-backdrop">
       <div className="mt5-connect-modal glass-panel" id="mt5-connect-modal">
@@ -97,11 +50,11 @@ export default function Mt5ConnectModal({
         <div className="mt5-modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div className="mt5-modal-icon-box">
-              <Monitor size={22} />
+              <Laptop size={22} style={{ color: '#45e0ad' }} />
             </div>
             <div>
-              <h3 className="mt5-modal-title">KONEKSI & LOGIN MT5 TERMINAL</h3>
-              <span className="mt5-modal-subtitle">Web-to-MT5 Visual Interface (noVNC)</span>
+              <h3 className="mt5-modal-title">KONEKSI MT5 LOKAL LAPTOP</h3>
+              <span className="mt5-modal-subtitle">High-Performance Direct WinINet Bridge</span>
             </div>
           </div>
           <button
@@ -126,27 +79,23 @@ export default function Mt5ConnectModal({
               ) : (
                 <AlertTriangle size={18} className="text-rose" />
               )}
-              <span style={{ fontWeight: 600 }}>
-                Status Jembatan: {isConnected ? 'TERHUBUNG (ONLINE)' : 'TERPUTUS (OFFLINE)'}
+              <span style={{ fontWeight: 700 }}>
+                Status Bridge: {isConnected ? 'MT5 LOKAL TERHUBUNG (ONLINE)' : 'MENUNGGU KONEKSI MT5 LOKAL'}
               </span>
             </div>
             {isConnected && accountNumber ? (
-              <span style={{ fontSize: '0.8rem', opacity: 0.9 }}>
+              <span style={{ fontSize: '0.8rem', opacity: 0.9, fontFamily: 'monospace' }}>
                 Akun #{accountNumber}
               </span>
-            ) : (
-              <span style={{ fontSize: '0.8rem', opacity: 0.85 }}>
-                Memerlukan login broker
-              </span>
-            )}
+            ) : null}
           </div>
 
-          {/* VNC Terminal Web Credentials Card */}
+          {/* Architecture Edge Info */}
           <div
             style={{
               padding: '12px 14px',
-              background: 'rgba(56, 189, 248, 0.08)',
-              border: '1px solid rgba(56, 189, 248, 0.25)',
+              background: 'rgba(69, 224, 173, 0.08)',
+              border: '1px solid rgba(69, 224, 173, 0.25)',
               borderRadius: '8px',
               fontSize: '0.8rem',
               display: 'flex',
@@ -154,31 +103,60 @@ export default function Mt5ConnectModal({
               gap: '6px'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#38bdf8', fontWeight: 600 }}>
-              <KeyRound size={14} />
-              <span>Kredensial Akses Terminal Web MT5 (Browser Prompt):</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#45e0ad', fontWeight: 700 }}>
+              <ShieldCheck size={15} />
+              <span>Direct Laptop Execution (Bebas Freeze Server):</span>
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', color: 'var(--text-main, #e2e8f0)', fontFamily: 'monospace' }}>
-              <div>User: <strong>fendi</strong></div>
-              <div>Password: <strong>fendi123</strong></div>
-            </div>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)' }}>
-              * Masukkan user & password di atas jika browser Anda meminta otentikasi saat halaman MT5 terbuka.
+            <div style={{ color: 'var(--text-main, #e2e8f0)', lineHeight: 1.4 }}>
+              MT5 berjalan langsung pada laptop Anda dengan performa native tanpa beban Wine/VNC server.
+              EA mengirimkan telemetry real-time dan mengeksekusi order dari web TradeGear secara instan.
             </div>
           </div>
 
-          {/* 3-Step Guided Walkthrough */}
+          {/* Target Backend Endpoint */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 600 }}>
+              URL Target Backend untuk BridgeEA:
+            </span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type="text"
+                readOnly
+                value={bridgeUrl}
+                style={{
+                  flex: 1,
+                  background: '#0a1419',
+                  border: '1px solid var(--line)',
+                  borderRadius: '8px',
+                  color: '#b8ffe6',
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  padding: '8px 12px'
+                }}
+              />
+              <button
+                type="button"
+                className="btn alt"
+                onClick={handleCopyUrl}
+                style={{ fontSize: '11px', padding: '8px 12px' }}
+              >
+                {copiedUrl ? <Check size={14} style={{ color: '#45e0ad' }} /> : 'Copy'}
+              </button>
+            </div>
+          </div>
+
+          {/* 3 Steps */}
           <div className="mt5-steps-container">
             <h4 className="mt5-steps-title">
-              Cara Login Akun Broker (Tanpa Coding / Tanpa Terminal):
+              Cara Menghubungkan BridgeEA di MT5 Laptop:
             </h4>
 
             <div className="mt5-step-card">
               <div className="mt5-step-number">1</div>
               <div className="mt5-step-content">
-                <strong>Buka Layar Visual MT5</strong>
+                <strong>Buka MT5 di Laptop</strong>
                 <p>
-                  Klik tombol <em>"Buka Layar MT5 di Tab Baru"</em> di bawah. Jendela visual MT5 asli akan muncul di tab browser Anda.
+                  Pastikan akun broker Anda (cth: Exness) sudah login pada terminal MetaTrader 5 di laptop.
                 </p>
               </div>
             </div>
@@ -186,14 +164,9 @@ export default function Mt5ConnectModal({
             <div className="mt5-step-card">
               <div className="mt5-step-number">2</div>
               <div className="mt5-step-content">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <KeyRound size={14} style={{ color: 'var(--accent-cyan)' }} />
-                  <strong>Pilih Menu Login</strong>
-                </div>
+                <strong>Pasang BridgeEA pada Chart</strong>
                 <p>
-                  Di pojok kiri atas jendela MT5, klik menu:
-                  <br />
-                  <code className="mt5-inline-code">File ➔ Login to Trade Account</code>
+                  Drag <code>BridgeEA</code> ke chart aktif (cth: XAUUSD M15). Pada tab <em>Common</em>, centang <strong>Allow Algo Trading</strong> dan <strong>Allow DLL Imports</strong>.
                 </p>
               </div>
             </div>
@@ -201,81 +174,38 @@ export default function Mt5ConnectModal({
             <div className="mt5-step-card">
               <div className="mt5-step-number">3</div>
               <div className="mt5-step-content">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Server size={14} style={{ color: 'var(--accent-cyan)' }} />
-                  <strong>Masukkan Data Broker Anda</strong>
-                </div>
+                <strong>Konfirmasi URL Backend</strong>
                 <p>
-                  Isi <strong>Login (No. Akun)</strong>, <strong>Password</strong>, dan pilih <strong>Server Broker</strong> Anda, lalu klik <strong>OK</strong>.
+                  Pada tab <em>Inputs</em>, pastikan <code>InpBackendUrl</code> mengarah ke <code>{bridgeUrl}</code>, lalu klik OK.
                 </p>
               </div>
             </div>
           </div>
 
           <p className="mt5-success-note">
-            💡 Begitu MT5 Anda berhasil login dan chart aktif, dashboard ini akan <strong>otomatis langsung berubah menjadi HIJAU (CONNECTED)</strong> dan menampilkan saldo Anda secara live.
+            💡 Status di dashboard ini akan otomatis menyala <strong>CONNECTED (HIJAU)</strong> dan menampilkan saldo, posisi aktif, dan riwayat secara langsung dari laptop Anda.
           </p>
-
-          {/* Advanced / Custom URL Config */}
-          <div className="mt5-config-section">
-            <button
-              type="button"
-              className="btn-toggle-config"
-              onClick={() => setShowConfig(!showConfig)}
-            >
-              <Settings2 size={13} />
-              <span>{showConfig ? 'Sembunyikan Pengaturan URL' : 'Kustomisasi URL MT5 (Jika Pakai Domain Khusus)'}</span>
-            </button>
-
-            {showConfig && (
-              <div className="mt5-config-input-box animate-fade-in">
-                <label htmlFor="mt5-vnc-url-input" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  Target Web-GUI URL:
-                </label>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                  <input
-                    id="mt5-vnc-url-input"
-                    type="text"
-                    value={vncUrl}
-                    onChange={(e) => handleSaveUrl(e.target.value)}
-                    placeholder="http://localhost:8088"
-                    className="mt5-url-input"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleSaveUrl(defaultUrl)}
-                    className="btn-reset-url"
-                    title="Kembalikan ke URL default"
-                  >
-                    Reset
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Modal Footer */}
         <div className="mt5-modal-footer">
           <button
             type="button"
+            className="btn alt"
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="btn-check-status"
             id="refresh-mt5-status-btn"
           >
             <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
             <span>{isRefreshing ? 'Memeriksa...' : 'Cek Status Sekarang'}</span>
           </button>
-
           <button
             type="button"
-            onClick={handleOpenVnc}
-            className="btn-open-mt5-primary"
-            id="open-mt5-vnc-primary-btn"
+            className="btn"
+            onClick={onClose}
+            id="close-mt5-modal-action-btn"
           >
-            <ExternalLink size={16} />
-            <span>Buka Layar MT5 di Tab Baru</span>
+            <span>Tutup</span>
           </button>
         </div>
       </div>

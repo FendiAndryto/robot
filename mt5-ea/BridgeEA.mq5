@@ -35,9 +35,11 @@
 
 //--- Inputs
 input group "--- Bridge Settings ---"
-input string InpBackendUrl        = "http://backend:8000"; // Backend API URL
-input int    InpHeartbeatInterval = 1;                     // Heartbeat interval in seconds
-input bool   InpVerboseLog        = false;                 // Print detailed logs to Experts tab
+input string InpBackendUrl        = "https://staging-trade-gear.homever.my.id"; // Backend API URL
+input string InpMonitoredSymbols  = "XAUUSD,EURUSD,GBPUSD,USDJPY,BTCUSD";      // Watchlist symbols (comma-separated)
+input int    InpHistoryDays       = 30;                                        // History lookback days
+input int    InpHeartbeatInterval = 1;                                         // Heartbeat interval in seconds
+input bool   InpVerboseLog        = false;                                     // Print detailed logs to Experts tab
 
 input group "--- Trade Settings ---"
 input ulong  InpMagicNumber       = 778899;                // Magic Number for orders
@@ -398,6 +400,149 @@ void ProcessBackendCommands(string responseJson)
 }
 
 //+------------------------------------------------------------------+
+//| Build JSON array of live quotes for monitored symbols           |
+//+------------------------------------------------------------------+
+string BuildMarketQuotesJson()
+{
+   string symbols[];
+   int totalSym = StringSplit(InpMonitoredSymbols, ',', symbols);
+   string json = "[";
+   int count = 0;
+   
+   for(int i = 0; i < totalSym; i++)
+   {
+      string sym = symbols[i];
+      StringTrimLeft(sym);
+      StringTrimRight(sym);
+      if(sym == "") continue;
+      
+      SymbolSelect(sym, true);
+      
+      double bid = SymbolInfoDouble(sym, SYMBOL_BID);
+      double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
+      if(bid <= 0.0) continue;
+      
+      int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+      int spread = (int)SymbolInfoInteger(sym, SYMBOL_SPREAD);
+      
+      double changePct = 0.0;
+      double high = bid;
+      double low = bid;
+      
+      MqlRates d1Rates[];
+      ArraySetAsSeries(d1Rates, true);
+      if(CopyRates(sym, PERIOD_D1, 0, 1, d1Rates) > 0)
+      {
+         if(d1Rates[0].open > 0.0)
+         {
+            changePct = ((bid - d1Rates[0].open) / d1Rates[0].open) * 100.0;
+         }
+         high = d1Rates[0].high;
+         low = d1Rates[0].low;
+      }
+      
+      if(count > 0) json += ",";
+      json += StringFormat(
+         "{\"symbol\":\"%s\",\"bid\":%.*f,\"ask\":%.*f,\"spread\":%d,\"digits\":%d,\"daily_change_pct\":%.2f,\"high\":%.*f,\"low\":%.*f}",
+         EscapeJsonString(sym),
+         digits, bid,
+         digits, ask,
+         spread,
+         digits,
+         changePct,
+         digits, high,
+         digits, low
+      );
+      count++;
+   }
+   json += "]";
+   return json;
+}
+
+//+------------------------------------------------------------------+
+//| Build JSON array of closed trade history from MT5 deals          |
+//+------------------------------------------------------------------+
+string BuildClosedTradesJson()
+{
+   datetime fromTime = TimeCurrent() - InpHistoryDays * 86400;
+   HistorySelect(fromTime, TimeCurrent());
+   int totalDeals = HistoryDealsTotal();
+   
+   string json = "[";
+   int count = 0;
+   int maxRecords = 50;
+   
+   for(int i = totalDeals - 1; i >= 0 && count < maxRecords; i--)
+   {
+      ulong dealTicket = HistoryDealGetTicket(i);
+      if(dealTicket <= 0) continue;
+      
+      long entryType = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+      if(entryType != DEAL_ENTRY_OUT) continue;
+      
+      string dealSymbol = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
+      long dealType = HistoryDealGetInteger(dealTicket, DEAL_TYPE);
+      double dealVol = HistoryDealGetDouble(dealTicket, DEAL_VOLUME);
+      double dealPrice = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
+      double dealProfit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT) + 
+                          HistoryDealGetDouble(dealTicket, DEAL_SWAP) + 
+                          HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
+      long dealTime = HistoryDealGetInteger(dealTicket, DEAL_TIME);
+      long dealMagic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
+      
+      string origType = (dealType == DEAL_TYPE_SELL ? "BUY" : "SELL");
+      
+      if(count > 0) json += ",";
+      json += StringFormat(
+         "{\"ticket\":%I64u,\"symbol\":\"%s\",\"type\":\"%s\",\"volume\":%.2f,\"open_price\":%.5f,\"close_price\":%.5f,\"profit\":%.2f,\"open_time\":%I64d,\"close_time\":%I64d,\"magic\":%I64d}",
+         dealTicket,
+         EscapeJsonString(dealSymbol),
+         origType,
+         dealVol,
+         dealPrice,
+         dealPrice,
+         dealProfit,
+         dealTime,
+         dealTime,
+         dealMagic
+      );
+      count++;
+   }
+   json += "]";
+   return json;
+}
+
+//+------------------------------------------------------------------+
+//| Build JSON array of recent M15 candles for chart symbol         |
+//+------------------------------------------------------------------+
+string BuildCandlesJson()
+{
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+   int copied = CopyRates(_Symbol, PERIOD_M15, 0, 35, rates);
+   if(copied <= 0) return "[]";
+   
+   string json = "[";
+   int count = 0;
+   for(int i = copied - 1; i >= 0; i--)
+   {
+      if(count > 0) json += ",";
+      json += StringFormat(
+         "{\"time\":%I64d,\"open\":%.5f,\"high\":%.5f,\"low\":%.5f,\"close\":%.5f,\"volume\":%.1f}",
+         (long)rates[i].time,
+         rates[i].open,
+         rates[i].high,
+         rates[i].low,
+         rates[i].close,
+         (double)rates[i].tick_volume
+      );
+      count++;
+   }
+   json += "]";
+   return json;
+}
+
+//+------------------------------------------------------------------+
 //| Build JSON telemetry payload with live positions list            |
 //+------------------------------------------------------------------+
 string BuildHeartbeatJson()
@@ -474,8 +619,12 @@ string BuildHeartbeatJson()
    }
    positionsJson += "]";
 
+   string quotesJson = BuildMarketQuotesJson();
+   string closedTradesJson = BuildClosedTradesJson();
+   string candlesJson = BuildCandlesJson();
+
    string json = StringFormat(
-      "{\"account_number\":%I64d,\"server\":\"%s\",\"currency\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"margin\":%.2f,\"free_margin\":%.2f,\"margin_level\":%.2f,\"floating_pnl\":%.2f,\"terminal_connected\":%s,\"open_positions\":%d,\"positions\":%s,\"timestamp\":%I64d}",
+      "{\"account_number\":%I64d,\"server\":\"%s\",\"currency\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"margin\":%.2f,\"free_margin\":%.2f,\"margin_level\":%.2f,\"floating_pnl\":%.2f,\"terminal_connected\":%s,\"open_positions\":%d,\"positions\":%s,\"market_quotes\":%s,\"closed_trades\":%s,\"candles\":%s,\"chart_symbol\":\"%s\",\"timestamp\":%I64d}",
       login,
       server,
       currency,
@@ -488,6 +637,10 @@ string BuildHeartbeatJson()
       connected ? "true" : "false",
       positions,
       positionsJson,
+      quotesJson,
+      closedTradesJson,
+      candlesJson,
+      EscapeJsonString(_Symbol),
       timestamp
    );
    

@@ -1,7 +1,7 @@
 import time
 import uuid
 import threading
-from typing import Optional, List
+from typing import Optional, List, Dict
 from fastapi import HTTPException, status
 from app.models.bridge import (
     HeartbeatPayload,
@@ -11,6 +11,11 @@ from app.models.bridge import (
     OrderRequest,
     OrderResponse,
     PositionItem,
+    MarketQuoteItem,
+    ClosedTradeItem,
+    TradeHistoryResponse,
+    EquityPointItem,
+    EquityCurveResponse,
 )
 from app.core.config import settings
 
@@ -27,6 +32,10 @@ class BridgeService:
         self._is_kill_switch_user: Optional[str] = None
         self._previous_positions_map: dict = {}
         self._previous_balance: Optional[float] = None
+        self._market_quotes: Dict[str, MarketQuoteItem] = {}
+        self._closed_trades_map: Dict[int, ClosedTradeItem] = {}
+        self._equity_snapshots: List[dict] = []
+        self._chart_symbol: Optional[str] = None
 
     def reset_state(self):
         """Reset internal state (primarily used for test isolation)."""
@@ -40,6 +49,10 @@ class BridgeService:
             self._kill_switch_user = None
             self._previous_positions_map.clear()
             self._previous_balance = None
+            self._market_quotes.clear()
+            self._closed_trades_map.clear()
+            self._equity_snapshots.clear()
+            self._chart_symbol = None
 
     def get_equity(self) -> Optional[float]:
         with self._lock:
@@ -120,6 +133,29 @@ class BridgeService:
         balance_delta = 0.0
 
         with self._lock:
+            # Update market quotes
+            if payload.market_quotes:
+                for q in payload.market_quotes:
+                    self._market_quotes[q.symbol.upper()] = q
+
+            # Update closed trades from MT5 history
+            if payload.closed_trades:
+                for t in payload.closed_trades:
+                    self._closed_trades_map[t.ticket] = t
+
+            if payload.chart_symbol:
+                self._chart_symbol = payload.chart_symbol.upper()
+
+            # Record equity snapshot (capped at 500 samples)
+            if payload.equity > 0:
+                self._equity_snapshots.append({
+                    "timestamp": int(current_time),
+                    "equity": payload.equity,
+                    "balance": payload.balance
+                })
+                if len(self._equity_snapshots) > 500:
+                    self._equity_snapshots.pop(0)
+
             # Detect closed positions by comparing with previous positions
             current_tickets = {pos.ticket for pos in payload.positions}
             if self._previous_positions_map:
@@ -139,6 +175,40 @@ class BridgeService:
             # Pop pending commands to return to EA
             commands_to_send = list(self._pending_commands)
             self._pending_commands.clear()
+
+        # Real-time strategy evaluation on real candles sent from MT5
+        if payload.candles and len(payload.candles) >= 20:
+            try:
+                from app.services.strategy_engine import strategy_engine
+                from app.services.autopilot_service import autopilot_service
+                from app.models.strategy import CandleData
+
+                parsed_candles = []
+                for c in payload.candles:
+                    if isinstance(c, CandleData):
+                        parsed_candles.append(c)
+                    elif isinstance(c, dict):
+                        parsed_candles.append(CandleData(**c))
+
+                sym_eval = self._chart_symbol or (payload.positions[0].symbol if payload.positions else "XAUUSD")
+                generated_signal = strategy_engine.evaluate_candles(
+                    symbol=sym_eval,
+                    candles=parsed_candles,
+                    live_equity=payload.equity
+                )
+
+                if generated_signal and autopilot_service.is_autopilot_active():
+                    auto_order = OrderRequest(
+                        action=generated_signal.action,
+                        symbol=generated_signal.symbol,
+                        volume=generated_signal.recommended_lot,
+                        sl=generated_signal.sl,
+                        tp=generated_signal.tp
+                    )
+                    self.submit_order(auto_order)
+                    autopilot_service.increment_auto_executed_count()
+            except Exception:
+                pass
 
         # Record closed trades into Daily Drawdown Tracker and dispatch Telegram alerts
         if closed_positions:
@@ -264,6 +334,63 @@ class BridgeService:
             
             return list(self._latest_payload.positions)
 
+    def get_market_quotes(self) -> List[MarketQuoteItem]:
+        with self._lock:
+            return sorted(list(self._market_quotes.values()), key=lambda x: x.symbol)
+
+    def get_trade_history(self) -> TradeHistoryResponse:
+        with self._lock:
+            trades = sorted(list(self._closed_trades_map.values()), key=lambda x: x.close_time, reverse=True)
+            total = len(trades)
+            if total == 0:
+                return TradeHistoryResponse(
+                    trades=[],
+                    net_pnl=0.0,
+                    win_rate=0.0,
+                    profit_factor=0.0,
+                    total_trades=0,
+                    winning_trades=0,
+                    losing_trades=0,
+                    gross_profit=0.0,
+                    gross_loss=0.0
+                )
+
+            gross_profit = round(sum(t.profit for t in trades if t.profit > 0), 2)
+            gross_loss = round(sum(abs(t.profit) for t in trades if t.profit < 0), 2)
+            net_pnl = round(sum(t.profit for t in trades), 2)
+            wins = sum(1 for t in trades if t.profit > 0)
+            losses = sum(1 for t in trades if t.profit < 0)
+            win_rate = round((wins / total) * 100.0, 1)
+            profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (gross_profit if gross_profit > 0 else 1.0)
+
+            return TradeHistoryResponse(
+                trades=trades,
+                net_pnl=net_pnl,
+                win_rate=win_rate,
+                profit_factor=profit_factor,
+                total_trades=total,
+                winning_trades=wins,
+                losing_trades=losses,
+                gross_profit=gross_profit,
+                gross_loss=gross_loss
+            )
+
+    def get_equity_curve(self) -> EquityCurveResponse:
+        with self._lock:
+            points = [
+                EquityPointItem(timestamp=s["timestamp"], equity=s["equity"], balance=s["balance"])
+                for s in self._equity_snapshots
+            ]
+            current_eq = self._latest_payload.equity if self._latest_payload else 0.0
+            starting_eq = points[0].equity if points else current_eq
+            peak_eq = max([p.equity for p in points], default=current_eq)
+            return EquityCurveResponse(
+                starting_equity=starting_eq,
+                current_equity=current_eq,
+                peak_equity=peak_eq,
+                points=points
+            )
+
     def get_status(self) -> BridgeStatusResponse:
         current_time = time.time()
         with self._lock:
@@ -277,6 +404,9 @@ class BridgeService:
                     seconds_since_last_heartbeat=None,
                     metrics=None,
                     positions=[],
+                    market_quotes=list(self._market_quotes.values()),
+                    chart_symbol=self._chart_symbol,
+                    closed_trades_count=len(self._closed_trades_map),
                     pending_commands_count=pending_count,
                     is_kill_switch_active=self._is_kill_switch_active,
                     kill_switch_reason=self._kill_switch_reason,
@@ -294,6 +424,9 @@ class BridgeService:
                 seconds_since_last_heartbeat=round(diff, 2),
                 metrics=self._latest_payload,
                 positions=positions,
+                market_quotes=list(self._market_quotes.values()),
+                chart_symbol=self._chart_symbol,
+                closed_trades_count=len(self._closed_trades_map),
                 pending_commands_count=pending_count,
                 is_kill_switch_active=self._is_kill_switch_active,
                 kill_switch_reason=self._kill_switch_reason,

@@ -8,6 +8,9 @@ from app.models.bridge import (
     OrderRequest,
     OrderResponse,
     PositionItem,
+    MarketQuoteItem,
+    TradeHistoryResponse,
+    EquityCurveResponse,
 )
 from app.services.bridge_service import bridge_service
 from app.core.deps import get_current_user
@@ -33,6 +36,36 @@ async def receive_heartbeat(payload: HeartbeatPayload):
 )
 async def get_bridge_status():
     return bridge_service.get_status()
+
+
+@router.get(
+    "/history",
+    response_model=TradeHistoryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Retrieve real closed deals history and calculated metrics directly from MT5"
+)
+async def get_trade_history():
+    return bridge_service.get_trade_history()
+
+
+@router.get(
+    "/market",
+    response_model=List[MarketQuoteItem],
+    status_code=status.HTTP_200_OK,
+    summary="Retrieve live quotes for monitored instruments from MT5 feed"
+)
+async def get_market_quotes():
+    return bridge_service.get_market_quotes()
+
+
+@router.get(
+    "/equity-curve",
+    response_model=EquityCurveResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Retrieve equity snapshots over time for dynamic performance chart"
+)
+async def get_equity_curve():
+    return bridge_service.get_equity_curve()
 
 
 @router.post(

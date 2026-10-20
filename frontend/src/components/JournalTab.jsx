@@ -1,72 +1,164 @@
-import React, { useState } from 'react';
-import { BookOpen, Calendar, ArrowUpRight } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { BookOpen, Calendar, ArrowUpRight, RefreshCw, Layers } from 'lucide-react';
+import { api } from '../services/api';
 
-const INITIAL_TRADES = [
-  { id: 1, symbol: 'XAUUSD', direction: 'BUY', source: 'Manual', time: 'Oct 19, 10:42', pnl: 84.20 },
-  { id: 2, symbol: 'EURUSD', direction: 'SELL', source: 'EA', time: 'Oct 19, 09:18', pnl: 42.50 },
-  { id: 3, symbol: 'BTCUSD', direction: 'BUY', source: 'Manual', time: 'Oct 18, 21:10', pnl: -18.00 },
-  { id: 4, symbol: 'GBPUSD', direction: 'SELL', source: 'EA', time: 'Oct 18, 15:35', pnl: 126.40 },
-  { id: 5, symbol: 'XAUUSD', direction: 'SELL', source: 'Unknown', time: 'Oct 17, 14:20', pnl: -55.80 },
-  { id: 6, symbol: 'EURUSD', direction: 'BUY', source: 'Manual', time: 'Oct 17, 11:06', pnl: 34.60 },
-  { id: 7, symbol: 'XAUUSD', direction: 'BUY', source: 'EA', time: 'Oct 16, 08:52', pnl: 98.20 },
-  { id: 8, symbol: 'BTCUSD', direction: 'SELL', source: 'Manual', time: 'Oct 15, 20:11', pnl: -72.00 }
-];
+const formatCurrency = (val, currency = 'USD') => {
+  if (val === null || val === undefined || isNaN(val)) return '$0.00';
+  const prefix = val >= 0 ? '+' : '−';
+  return `${prefix}$${Math.abs(val).toFixed(2)}`;
+};
 
 export default function JournalTab({ onNavigateAI }) {
+  const [historyData, setHistoryData] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [selectedDate, setSelectedDate] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const filteredTrades = INITIAL_TRADES.filter((trade) => {
-    const matchesFilter = filter === 'All' || trade.source === filter;
+  const fetchHistory = async () => {
+    try {
+      const data = await api.getTradeHistory();
+      setHistoryData(data);
+    } catch (err) {
+      console.error('Failed to load trade history:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchHistory();
+  }, []);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchHistory();
+  };
+
+  const trades = historyData?.trades || [];
+  const netPnl = historyData?.net_pnl ?? 0;
+  const winRate = historyData?.win_rate ?? 0;
+  const profitFactor = historyData?.profit_factor ?? 0;
+  const totalTrades = historyData?.total_trades ?? 0;
+  const winningTrades = historyData?.winning_trades ?? 0;
+  const losingTrades = historyData?.losing_trades ?? 0;
+
+  const filteredTrades = trades.filter((t) => {
+    const isEa = t.magic > 0;
+    const source = isEa ? 'EA' : 'Manual';
+    const matchesFilter = filter === 'All' || source === filter;
     const matchesSearch =
-      trade.symbol.toLowerCase().includes(search.toLowerCase()) ||
-      trade.source.toLowerCase().includes(search.toLowerCase());
+      t.symbol.toLowerCase().includes(search.toLowerCase()) ||
+      source.toLowerCase().includes(search.toLowerCase()) ||
+      String(t.ticket).includes(search);
     return matchesFilter && matchesSearch;
+  });
+
+  const handleExportCSV = () => {
+    if (trades.length === 0) {
+      alert('Belum ada riwayat transaksi MT5 untuk diekspor.');
+      return;
+    }
+
+    const headers = ['Ticket', 'Symbol', 'Type', 'Volume', 'Open Price', 'Close Price', 'Net PnL', 'Close Time', 'Magic'];
+    const rows = trades.map((t) => [
+      t.ticket,
+      t.symbol,
+      t.type,
+      t.volume,
+      t.open_price,
+      t.close_price,
+      t.profit,
+      new Date(t.close_time * 1000).toISOString(),
+      t.magic
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `MT5_Trade_Journal_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Group real trades by day of current month for calendar
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const monthName = new Intl.DateTimeFormat('id-ID', { month: 'long' }).format(new Date());
+
+  const dailyPnlMap = {};
+  trades.forEach((t) => {
+    if (t.close_time) {
+      const d = new Date(t.close_time * 1000);
+      if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+        const dayNum = d.getDate();
+        dailyPnlMap[dayNum] = (dailyPnlMap[dayNum] || 0) + t.profit;
+      }
+    }
   });
 
   return (
     <div className="journal-tab-container animate-fade-in">
       <div className="heading">
         <div>
-          <div className="eyebrow">YOUR TRADING HISTORY</div>
+          <div className="eyebrow">MT5 REAL TRADING JOURNAL</div>
           <h1>Trading Journal</h1>
-          <div className="sub">Satu jurnal terpadu untuk transaksi manual dan EA algorithmic.</div>
+          <div className="sub">Riwayat transaksi objektif tersinkronisasi langsung dari akun MetaTrader 5.</div>
         </div>
-        <button
-          type="button"
-          className="btn alt"
-          onClick={() => alert('Export jurnal akan tersedia saat koneksi riwayat MT5 penuh aktif.')}
-          id="journal-export-btn"
-        >
-          <ArrowUpRight size={14} />
-          <span>Export ↗</span>
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            type="button"
+            className="btn alt"
+            onClick={handleRefresh}
+            title="Refresh Riwayat MT5"
+            id="journal-refresh-btn"
+            style={{ padding: '8px 12px' }}
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={handleExportCSV}
+            id="journal-export-btn"
+            style={{ padding: '8px 14px' }}
+          >
+            <ArrowUpRight size={14} />
+            <span>Export CSV</span>
+          </button>
+        </div>
       </div>
 
-      {/* KPIs Grid */}
+      {/* Real KPIs Grid */}
       <div className="grid kpis">
-        <div className="card">
-          <div className="metric positive">+$1,842.60</div>
-          <div className="label">Net P/L · 30 hari</div>
+        <div className="card" id="journal-kpi-net-pnl">
+          <div className={`metric ${netPnl >= 0 ? 'positive' : 'negative'}`}>
+            {formatCurrency(netPnl)}
+          </div>
+          <div className="label">Realized Net P/L · Real MT5</div>
         </div>
-        <div className="card">
-          <div className="metric">64.8%</div>
-          <div className="label">Win Rate</div>
+        <div className="card" id="journal-kpi-win-rate">
+          <div className="metric">{winRate.toFixed(1)}%</div>
+          <div className="label">Win Rate ({winningTrades}W / {losingTrades}L)</div>
         </div>
-        <div className="card">
-          <div className="metric">1.72</div>
+        <div className="card" id="journal-kpi-profit-factor">
+          <div className="metric">{profitFactor.toFixed(2)}</div>
           <div className="label">Profit Factor</div>
         </div>
-        <div className="card">
-          <div className="metric negative">−4.6%</div>
-          <div className="label">Max Drawdown</div>
+        <div className="card" id="journal-kpi-total-trades">
+          <div className="metric">{totalTrades}</div>
+          <div className="label">Total Closed Deals</div>
         </div>
       </div>
 
       {/* Filter Tabs */}
       <div style={{ display: 'flex', gap: '7px', overflowX: 'auto', padding: '4px 0 12px' }}>
-        {['All', 'Manual', 'EA', 'Unknown'].map((f) => (
+        {['All', 'Manual', 'EA'].map((f) => (
           <button
             key={f}
             type="button"
@@ -74,7 +166,7 @@ export default function JournalTab({ onNavigateAI }) {
             style={{ fontSize: '11px', padding: '7px 14px' }}
             onClick={() => setFilter(f)}
           >
-            {f === 'All' ? 'All Trades' : f === 'EA' ? 'EA Trading' : f}
+            {f === 'All' ? 'Semua Transaksi' : f === 'EA' ? 'Robot / EA' : 'Manual Trader'}
           </button>
         ))}
       </div>
@@ -85,7 +177,7 @@ export default function JournalTab({ onNavigateAI }) {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Cari instrumen atau sumber (cth: XAUUSD, EA, Manual)..."
+          placeholder="Cari simbol, ticket, atau sumber (cth: XAUUSD, EA, #12345)..."
           style={{
             width: '100%',
             background: '#0b151b',
@@ -105,7 +197,7 @@ export default function JournalTab({ onNavigateAI }) {
         <div className="cardhead">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <BookOpen size={16} style={{ color: 'var(--g)' }} />
-            <h3>Trade History</h3>
+            <h3>Riwayat Transaksi Real MT5</h3>
           </div>
           <span className="tiny">{filteredTrades.length} records</span>
         </div>
@@ -114,44 +206,77 @@ export default function JournalTab({ onNavigateAI }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--line)', textAlign: 'left' }}>
+                <th style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: '10px' }}>TICKET</th>
                 <th style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: '10px' }}>INSTRUMEN</th>
                 <th style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: '10px' }}>ARAH</th>
+                <th style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: '10px' }}>LOT</th>
+                <th style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: '10px' }}>HARGA EXIT</th>
                 <th style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: '10px' }}>SUMBER</th>
-                <th style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: '10px' }}>WAKTU</th>
-                <th style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: '10px', textAlign: 'right' }}>NET P/L</th>
+                <th style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: '10px' }}>WAKTU TUTUP</th>
+                <th style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: '10px', textAlign: 'right' }}>REALIZED P/L</th>
               </tr>
             </thead>
             <tbody>
-              {filteredTrades.map((t) => (
-                <tr key={t.id} style={{ borderBottom: '1px solid #1c2b33' }}>
-                  <td style={{ padding: '12px 8px', fontWeight: 800 }}>{t.symbol}</td>
-                  <td style={{ padding: '12px 8px' }}>
-                    <span className={`tag ${t.direction === 'SELL' ? 'red' : ''}`}>
-                      {t.direction}
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px 8px' }}>
-                    <span className={`tag ${t.source === 'EA' ? 'blue' : t.source === 'Unknown' ? 'amber' : ''}`}>
-                      {t.source}
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px 8px', color: 'var(--muted)', fontSize: '11px' }}>{t.time}</td>
-                  <td
-                    style={{
-                      padding: '12px 8px',
-                      textAlign: 'right',
-                      fontWeight: 800,
-                      color: t.pnl >= 0 ? 'var(--g)' : 'var(--red)'
-                    }}
-                  >
-                    {t.pnl >= 0 ? '+' : '−'}${Math.abs(t.pnl).toFixed(2)}
-                  </td>
-                </tr>
-              ))}
+              {filteredTrades.map((t) => {
+                const isEa = t.magic > 0;
+                const source = isEa ? 'EA' : 'Manual';
+                const closeDateStr = t.close_time
+                  ? new Date(t.close_time * 1000).toLocaleString('id-ID', {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })
+                  : '—';
+
+                return (
+                  <tr key={t.ticket} style={{ borderBottom: '1px solid #1c2b33' }}>
+                    <td style={{ padding: '12px 8px', color: 'var(--muted)', fontSize: '11px', fontFamily: 'monospace' }}>
+                      #{t.ticket}
+                    </td>
+                    <td style={{ padding: '12px 8px', fontWeight: 800 }}>{t.symbol}</td>
+                    <td style={{ padding: '12px 8px' }}>
+                      <span className={`tag ${t.type === 'SELL' ? 'red' : ''}`}>
+                        {t.type}
+                      </span>
+                    </td>
+                    <td style={{ padding: '12px 8px', fontFamily: 'monospace' }}>
+                      {t.volume.toFixed(2)}
+                    </td>
+                    <td style={{ padding: '12px 8px', fontFamily: 'monospace' }}>
+                      {t.close_price.toFixed(t.symbol.includes('JPY') ? 3 : t.symbol.includes('XAU') ? 2 : 5)}
+                    </td>
+                    <td style={{ padding: '12px 8px' }}>
+                      <span className={`tag ${isEa ? 'blue' : ''}`}>
+                        {source}
+                      </span>
+                    </td>
+                    <td style={{ padding: '12px 8px', color: 'var(--muted)', fontSize: '11px' }}>
+                      {closeDateStr}
+                    </td>
+                    <td
+                      style={{
+                        padding: '12px 8px',
+                        textAlign: 'right',
+                        fontWeight: 800,
+                        color: t.profit >= 0 ? 'var(--g)' : 'var(--red)'
+                      }}
+                    >
+                      {t.profit >= 0 ? '+' : '−'}${Math.abs(t.profit).toFixed(2)}
+                    </td>
+                  </tr>
+                );
+              })}
               {filteredTrades.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{ padding: '24px 8px', textAlign: 'center', color: 'var(--muted)' }}>
-                    Tidak ada transaksi yang cocok dengan pencarian.
+                  <td colSpan={8} style={{ padding: '36px 8px', textAlign: 'center', color: 'var(--muted)' }}>
+                    <Layers size={28} style={{ margin: '0 auto 10px', opacity: 0.4 }} />
+                    <div style={{ fontWeight: 600, fontSize: '13px', color: '#c9d8dc' }}>
+                      {loading ? 'Memuat riwayat transaksi dari MT5...' : 'Belum Ada Transaksi Tertutup'}
+                    </div>
+                    <div style={{ fontSize: '11px', marginTop: '4px' }}>
+                      Transaksi yang dieksekusi dan ditutup pada MetaTrader 5 akan otomatis tersinkronisasi di sini secara real-time.
+                    </div>
                   </td>
                 </tr>
               )}
@@ -160,11 +285,11 @@ export default function JournalTab({ onNavigateAI }) {
         </div>
       </div>
 
-      {/* Trading Calendar */}
+      {/* Real Trading Calendar */}
       <div className="section" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
         <Calendar size={16} style={{ color: 'var(--g)' }} />
         <span>Trading Calendar</span>
-        <span className="tiny">Oktober</span>
+        <span className="tiny">{monthName} {currentYear}</span>
       </div>
 
       <div className="card" style={{ marginBottom: '20px' }}>
@@ -174,9 +299,11 @@ export default function JournalTab({ onNavigateAI }) {
               {day}
             </div>
           ))}
-          {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => {
-            const isLoss = d % 7 === 0;
-            const isWin = d % 7 !== 0 && d % 3 === 0;
+          {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
+            const dayPnl = dailyPnlMap[d];
+            const hasTrades = dayPnl !== undefined;
+            const isLoss = hasTrades && dayPnl < 0;
+            const isWin = hasTrades && dayPnl > 0;
             const bg = isLoss ? '#48242a' : isWin ? '#164236' : '#142229';
             const color = isLoss ? '#ff9ba5' : isWin ? '#7ce8be' : '#8fa2a8';
             return (
@@ -197,25 +324,25 @@ export default function JournalTab({ onNavigateAI }) {
               >
                 {d}
                 <br />
-                {isLoss ? '−$48' : isWin ? '+$42' : '·'}
+                {hasTrades ? (dayPnl >= 0 ? `+$${dayPnl.toFixed(0)}` : `−$${Math.abs(dayPnl).toFixed(0)}`) : '·'}
               </button>
             );
           })}
         </div>
         {selectedDate && (
           <div className="tiny" style={{ marginTop: '12px', color: 'var(--g)' }}>
-            Tanggal {selectedDate} Oktober terpilih. Ringkasan performa harian aktif.
+            Tanggal {selectedDate} {monthName}: Realized P/L {dailyPnlMap[selectedDate] !== undefined ? `$${dailyPnlMap[selectedDate].toFixed(2)}` : '$0.00 (tidak ada closed trade)'}.
           </div>
         )}
       </div>
 
       {/* AI Pattern Review Card */}
       <div className="card">
-        <div className="eyebrow">PATTERN FOUND · AI INSIGHT</div>
-        <h3 style={{ margin: '8px 0', fontSize: '14px' }}>Loss cenderung muncul setelah entry terlambat</h3>
+        <div className="eyebrow">OBJECTIVE PERFORMANCE AUDIT</div>
+        <h3 style={{ margin: '8px 0', fontSize: '14px' }}>Real-time Risk & Discipline Tracking</h3>
         <p className="sub" style={{ lineHeight: 1.5 }}>
-          Berdasarkan riwayat transaksi, transaksi BUY memiliki win-rate 68% saat dieksekusi di sesi London,
-          namun mengalami penurunan performa jika dieksekusi saat fase konsolidasi New York.
+          Jurnal ini merefleksikan seluruh transaksi akun MT5 secara langsung tanpa interpolasi atau data buatan.
+          Gunakan metrik Win Rate dan Profit Factor untuk mengevaluasi konsistensi eksekusi sebelum meningkatkan ukuran lot.
         </p>
         {onNavigateAI && (
           <button
@@ -225,7 +352,7 @@ export default function JournalTab({ onNavigateAI }) {
             onClick={onNavigateAI}
             id="journal-ai-coach-btn"
           >
-            Buka AI Assistant →
+            Review Strategi dengan AI Coach →
           </button>
         )}
       </div>

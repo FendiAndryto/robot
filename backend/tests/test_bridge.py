@@ -91,3 +91,105 @@ def test_cors_settings():
     assert "http://localhost:3000" in origins
 
 
+def test_market_and_history_and_equity_curve():
+    bridge_service.reset_state()
+
+    # 1. Heartbeat with real market quotes and closed trades
+    now = int(time.time())
+    payload = {
+        "account_number": 99887766,
+        "server": "Exness-Real",
+        "currency": "USD",
+        "balance": 25000.0,
+        "equity": 25150.0,
+        "margin": 500.0,
+        "free_margin": 24650.0,
+        "margin_level": 5030.0,
+        "floating_pnl": 150.0,
+        "terminal_connected": True,
+        "open_positions": 0,
+        "market_quotes": [
+            {
+                "symbol": "XAUUSD",
+                "bid": 2725.50,
+                "ask": 2725.80,
+                "spread": 30,
+                "digits": 2,
+                "daily_change_pct": 0.45,
+                "high": 2732.10,
+                "low": 2718.00
+            },
+            {
+                "symbol": "EURUSD",
+                "bid": 1.08520,
+                "ask": 1.08535,
+                "spread": 15,
+                "digits": 5,
+                "daily_change_pct": -0.12,
+                "high": 1.08700,
+                "low": 1.08300
+            }
+        ],
+        "closed_trades": [
+            {
+                "ticket": 1001,
+                "symbol": "XAUUSD",
+                "type": "BUY",
+                "volume": 0.05,
+                "open_price": 2715.00,
+                "close_price": 2725.00,
+                "profit": 50.00,
+                "open_time": now - 3600,
+                "close_time": now - 1800,
+                "magic": 778899
+            },
+            {
+                "ticket": 1002,
+                "symbol": "EURUSD",
+                "type": "SELL",
+                "volume": 0.10,
+                "open_price": 1.08600,
+                "close_price": 1.08800,
+                "profit": -20.00,
+                "open_time": now - 7200,
+                "close_time": now - 3600,
+                "magic": 0
+            }
+        ],
+        "chart_symbol": "XAUUSD",
+        "timestamp": now
+    }
+
+    res = client.post("/api/v1/bridge/heartbeat", json=payload)
+    assert res.status_code == 200
+
+    # 2. Check /api/v1/bridge/market
+    m_res = client.get("/api/v1/bridge/market")
+    assert m_res.status_code == 200
+    quotes = m_res.json()
+    assert len(quotes) == 2
+    symbols = [q["symbol"] for q in quotes]
+    assert "XAUUSD" in symbols
+    assert "EURUSD" in symbols
+
+    # 3. Check /api/v1/bridge/history
+    h_res = client.get("/api/v1/bridge/history")
+    assert h_res.status_code == 200
+    hist = h_res.json()
+    assert hist["total_trades"] == 2
+    assert hist["winning_trades"] == 1
+    assert hist["losing_trades"] == 1
+    assert hist["net_pnl"] == 30.00
+    assert hist["win_rate"] == 50.0
+    assert hist["gross_profit"] == 50.00
+    assert hist["gross_loss"] == 20.00
+    assert hist["profit_factor"] == 2.5
+
+    # 4. Check /api/v1/bridge/equity-curve
+    eq_res = client.get("/api/v1/bridge/equity-curve")
+    assert eq_res.status_code == 200
+    eq_data = eq_res.json()
+    assert eq_data["current_equity"] == 25150.0
+    assert len(eq_data["points"]) >= 1
+
+

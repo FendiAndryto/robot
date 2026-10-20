@@ -203,7 +203,12 @@ export default function Dashboard({ user, onLogout }) {
 
         {/* Tab 3: Market Overview */}
         <div className={`page-container ${activeTab === 'market' ? 'active' : ''}`} id="tab-market">
-          <MarketTab />
+          <MarketTab
+            bridgeStatus={bridgeStatus}
+            onOpenOrder={(sym) => {
+              setIsOrderDrawerOpen(true);
+            }}
+          />
         </div>
 
         {/* Tab 4: AI Assistant (Coming Soon) */}

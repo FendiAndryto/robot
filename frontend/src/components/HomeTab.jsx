@@ -31,6 +31,7 @@ export default function HomeTab({
 }) {
   const [chartRange, setChartRange] = useState('1M');
   const [closingTicket, setClosingTicket] = useState(null);
+  const [equityCurveData, setEquityCurveData] = useState(null);
 
   const metrics = bridgeStatus?.metrics || {};
   const isConnected = bridgeStatus?.is_connected || false;
@@ -40,6 +41,19 @@ export default function HomeTab({
   const floatingPnl = metrics.floating_pnl ?? 0;
   const openPositionsCount = metrics.open_positions ?? 0;
   const positions = bridgeStatus?.positions || metrics.positions || [];
+  const marketQuotes = bridgeStatus?.market_quotes || [];
+
+  React.useEffect(() => {
+    const fetchCurve = async () => {
+      try {
+        const data = await api.getEquityCurve();
+        setEquityCurveData(data);
+      } catch {
+        // Ignore transient error
+      }
+    };
+    fetchCurve();
+  }, [bridgeStatus]);
 
   const handleClosePosition = async (ticket) => {
     if (!window.confirm(`Konfirmasi tutup posisi ticket #${ticket}?`)) return;
@@ -56,15 +70,15 @@ export default function HomeTab({
 
   return (
     <div className="home-tab-container animate-fade-in">
-      {/* Heading & Account Pill */}
+      {/* Heading & Real Account Pill */}
       <div className="heading">
         <div>
-          <div className="eyebrow">TRADING COMMAND CENTER</div>
-          <h1>Good morning, Trader.</h1>
-          <div className="sub">Semua metrik dan eksekusi MT5, dalam satu tampilan terpadu.</div>
+          <div className="eyebrow">MT5 LIVE COMMAND CENTER</div>
+          <h1>Good day, Trader.</h1>
+          <div className="sub">Semua metrik dan eksekusi real-time dari MetaTrader 5 lokal laptop.</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <select
+          <div
             style={{
               border: '1px solid var(--line)',
               background: '#0d171d',
@@ -72,16 +86,16 @@ export default function HomeTab({
               padding: '7px 12px',
               borderRadius: '10px',
               fontSize: '11px',
-              outline: 'none',
-              cursor: 'pointer'
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
             }}
-            id="home-account-select"
-            defaultValue="main"
+            id="home-account-badge"
           >
-            <option value="main">MT5 • Main Account</option>
-            <option value="ea">MT5 • EA Confluence</option>
-            <option value="demo">Demo • Sandbox</option>
-          </select>
+            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: isConnected ? '#45e0ad' : '#ff5b6b' }} />
+            <b style={{ color: '#fff' }}>{metrics.account_number ? `#${metrics.account_number}` : 'MT5 Standby'}</b>
+            <span style={{ color: 'var(--muted)', fontSize: '10px' }}>({metrics.server || 'Exness'})</span>
+          </div>
           {onRefresh && (
             <button
               type="button"
@@ -204,12 +218,12 @@ export default function HomeTab({
 
       {/* Account Performance Curve & Market Brief */}
       <div className="grid two" style={{ marginBottom: '20px' }}>
-        {/* Performance Chart */}
+        {/* Real Performance Chart */}
         <div className="card">
           <div className="cardhead">
             <div>
               <h3>Account Performance</h3>
-              <div className="tiny">Equity growth curve · live MT5 tracking</div>
+              <div className="tiny">Live MT5 Equity Growth Curve</div>
             </div>
             <div style={{ display: 'flex', gap: '3px', background: '#0a1419', padding: '3px', borderRadius: '8px', border: '1px solid var(--line)' }}>
               {['1W', '1M', '3M', 'ALL'].map((rng) => (
@@ -234,65 +248,96 @@ export default function HomeTab({
             </div>
           </div>
 
-          <svg className="chart" viewBox="0 0 600 180" preserveAspectRatio="none" style={{ width: '100%', height: '175px', display: 'block' }}>
-            <defs>
-              <linearGradient id="tradegear-area" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stopColor="#45e0ad" stopOpacity="0.25" />
-                <stop offset="1" stopColor="#45e0ad" stopOpacity="0" />
-              </linearGradient>
-            </defs>
-            <g stroke="#1e343d" strokeDasharray="4 7">
-              <path d="M0 35H600M0 75H600M0 115H600M0 155H600" />
-            </g>
-            <path
-              d="M0 153 C35 143 38 155 68 129 S105 135 135 111 S175 127 207 94 S245 111 276 84 S312 98 342 69 S378 88 407 62 S450 79 478 48 S515 68 540 39 S573 50 600 22 L600 180 L0 180Z"
-              fill="url(#tradegear-area)"
-            />
-            <path
-              d="M0 153 C35 143 38 155 68 129 S105 135 135 111 S175 127 207 94 S245 111 276 84 S312 98 342 69 S378 88 407 62 S450 79 478 48 S515 68 540 39 S573 50 600 22"
-              fill="none"
-              stroke="#45e0ad"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-            />
-          </svg>
+          {(() => {
+            const points = equityCurveData?.points || [];
+            let pathD = '';
+            let areaD = '';
+
+            if (points.length >= 2) {
+              const equities = points.map((p) => p.equity);
+              let minEq = Math.min(...equities);
+              let maxEq = Math.max(...equities);
+              if (maxEq - minEq < 1.0) {
+                maxEq += 5.0;
+                minEq -= 5.0;
+              }
+              const coords = points.map((p, idx) => {
+                const x = Math.round((idx / (points.length - 1)) * 600);
+                const y = Math.round(155 - ((p.equity - minEq) / (maxEq - minEq)) * 120);
+                return `${x},${y}`;
+              });
+              pathD = `M ${coords.join(' L ')}`;
+              areaD = `${pathD} L 600,180 L 0,180 Z`;
+            } else {
+              // Steady baseline at current equity
+              pathD = 'M 0,90 L 600,90';
+              areaD = 'M 0,90 L 600,90 L 600,180 L 0,180 Z';
+            }
+
+            return (
+              <svg className="chart" viewBox="0 0 600 180" preserveAspectRatio="none" style={{ width: '100%', height: '175px', display: 'block' }}>
+                <defs>
+                  <linearGradient id="tradegear-area" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stopColor="#45e0ad" stopOpacity="0.25" />
+                    <stop offset="1" stopColor="#45e0ad" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <g stroke="#1e343d" strokeDasharray="4 7">
+                  <path d="M0 35H600M0 75H600M0 115H600M0 155H600" />
+                </g>
+                <path d={areaD} fill="url(#tradegear-area)" />
+                <path d={pathD} fill="none" stroke="#45e0ad" strokeWidth="2.5" strokeLinecap="round" />
+              </svg>
+            );
+          })()}
           <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)', fontSize: '9px', marginTop: '6px' }}>
-            <span>Sep 19</span>
-            <span>Sep 26</span>
-            <span>Oct 03</span>
-            <span>Oct 10</span>
-            <span>Today</span>
+            <span>Live Equity Baseline: {formatCurrency(equity, currency)}</span>
+            <span>Balance: {formatCurrency(balance, currency)}</span>
+            <span>Floating: {floatingPnl >= 0 ? '+' : ''}{formatCurrency(floatingPnl, currency)}</span>
           </div>
         </div>
 
-        {/* AI Market Brief Card */}
+        {/* Real Live Market Brief Card */}
         <div className="card">
           <div className="cardhead">
-            <h3>AI Market Brief</h3>
-            <span className="tag blue">LIVE BRIEF</span>
+            <h3>Live Market Feed</h3>
+            <span className="tag blue">MT5 TELEMETRY</span>
           </div>
-          <div className="row">
-            <div className="coin">Au</div>
-            <div className="grow">
-              <div className="rowtitle">XAUUSD</div>
-              <div className="rowsub">Momentum bullish menguat · pantau 4,210</div>
+
+          {marketQuotes.length > 0 ? (
+            marketQuotes.slice(0, 2).map((q) => {
+              const isPos = q.daily_change_pct >= 0;
+              const isCrypto = q.symbol.includes('BTC');
+              const isGold = q.symbol.includes('XAU');
+              const icon = isCrypto ? '₿' : isGold ? 'Au' : q.symbol.slice(0, 2);
+              const priceStr = q.bid > 0 ? (isCrypto || isGold ? `$${q.bid.toFixed(q.digits)}` : q.bid.toFixed(q.digits)) : '—';
+
+              return (
+                <div key={q.symbol} className="row" style={{ padding: '8px 0' }}>
+                  <div className="coin">{icon}</div>
+                  <div className="grow">
+                    <div className="rowtitle">{q.symbol}</div>
+                    <div className="rowsub">
+                      Spread {q.spread} pts · High {q.high.toFixed(q.digits)} / Low {q.low.toFixed(q.digits)}
+                    </div>
+                  </div>
+                  <div className="end">
+                    {priceStr}
+                    <small className={isPos ? 'positive' : 'negative'}>
+                      {isPos ? '+' : ''}{q.daily_change_pct.toFixed(2)}%
+                    </small>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--muted)', fontSize: '12px' }}>
+              Sinkronisasi harga instrumen dari MT5 lokal laptop...
             </div>
-            <div className="end">
-              $4,218.60<small className="positive">+0.42%</small>
-            </div>
-          </div>
-          <div className="row">
-            <div className="coin">₿</div>
-            <div className="grow">
-              <div className="rowtitle">BTCUSD</div>
-              <div className="rowsub">Range konsolidasi · tunggu konfirmasi breakout</div>
-            </div>
-            <div className="end">
-              $67,240<small className="negative">−0.18%</small>
-            </div>
-          </div>
+          )}
+
           <div className="sub" style={{ marginTop: '10px', fontSize: '11px', color: 'var(--muted)' }}>
-            Ringkasan korelasi dan tren teknikal terintegrasi dengan MT5 tick stream.
+            Feed harga langsung ditransmisikan oleh EA dari MetaTrader 5 setiap 1 detik.
           </div>
           {onNavigateMarket && (
             <button
@@ -302,7 +347,7 @@ export default function HomeTab({
               onClick={onNavigateMarket}
               id="home-open-market-btn"
             >
-              <span>Buka Market Overview →</span>
+              <span>Buka Market Overview ({marketQuotes.length} instrumen) →</span>
             </button>
           )}
         </div>

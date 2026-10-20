@@ -144,6 +144,36 @@ export const api = {
     return res.json();
   },
 
+  async getMarketQuotes() {
+    const res = await authFetch(`${API_BASE}/api/v1/bridge/market`, {
+      method: 'GET'
+    });
+    if (!res.ok) {
+      throw new Error('Failed to fetch market quotes');
+    }
+    return res.json();
+  },
+
+  async getTradeHistory() {
+    const res = await authFetch(`${API_BASE}/api/v1/bridge/history`, {
+      method: 'GET'
+    });
+    if (!res.ok) {
+      throw new Error('Failed to fetch trade history');
+    }
+    return res.json();
+  },
+
+  async getEquityCurve() {
+    const res = await authFetch(`${API_BASE}/api/v1/bridge/equity-curve`, {
+      method: 'GET'
+    });
+    if (!res.ok) {
+      throw new Error('Failed to fetch equity curve');
+    }
+    return res.json();
+  },
+
   // Trade Execution
   async submitOrder(orderData) {
     const res = await authFetch(`${API_BASE}/api/v1/bridge/order`, {

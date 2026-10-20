@@ -1,20 +1,21 @@
 services:
-  mt5:
-    image: robot-mt5:custom
-    container_name: robot_mt5
-    restart: unless-stopped
-    shm_size: "1g"
-    security_opt:
-      - seccomp:unconfined
-    ports:
-      - "${MT5_VNC_PORT:-8088}:3000"
-    environment:
-      - CUSTOM_USER=${MT5_VNC_USER:-fendi}
-      - PASSWORD=${MT5_VNC_PASSWORD:-fendi123}
-    volumes:
-      - mt5_data:/config
-    networks:
-      - robot_net
+  # MT5 service disabled on server: Trading terminal runs natively on local laptop
+  # mt5:
+  #   image: robot-mt5:custom
+  #   container_name: robot_mt5
+  #   restart: unless-stopped
+  #   shm_size: "1g"
+  #   security_opt:
+  #     - seccomp:unconfined
+  #   ports:
+  #     - "${MT5_VNC_PORT:-8088}:3000"
+  #   environment:
+  #     - CUSTOM_USER=${MT5_VNC_USER:-fendi}
+  #     - PASSWORD=${MT5_VNC_PASSWORD:-fendi123}
+  #   volumes:
+  #     - mt5_data:/config
+  #   networks:
+  #     - robot_net
 
   backend:
     build:
