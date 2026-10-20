@@ -72,41 +72,33 @@ export default function FloatingSignalWidget({
     <div
       className="floating-signals-container"
       id="floating-strategy-signals"
-      style={{
-        position: 'fixed',
-        right: '16px',
-        bottom: '82px', // Positioned safely above the mobile bottom navigation bar
-        zIndex: 45,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'flex-end',
-        gap: '8px'
-      }}
     >
-      {/* Expanded Floating Signal Card */}
+      {/* Expanded Floating Signal Card (Docked to bottom, constrained below navbar) */}
       {isOpen && (
         <div
-          className="card"
-          style={{
-            width: '320px',
-            maxWidth: 'calc(100vw - 32px)',
-            maxHeight: '440px',
-            overflowY: 'auto',
-            background: 'rgba(17, 30, 38, 0.96)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            borderColor: 'rgba(69, 224, 173, 0.4)',
-            boxShadow: '0 16px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(69, 224, 173, 0.15)',
-            borderRadius: '16px',
-            padding: '14px',
-            animation: 'pageIn 0.2s ease-out'
-          }}
+          className="floating-signals-card"
+          id="floating-signals-expanded-card"
         >
-          {/* Card Header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+          {/* Card Header (Sticky at top of card, never obscured) */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '12px 14px',
+              borderBottom: '1px solid var(--line)',
+              background: 'rgba(12, 22, 28, 0.98)',
+              position: 'sticky',
+              top: 0,
+              zIndex: 3
+            }}
+          >
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Zap size={15} style={{ color: 'var(--g)' }} />
-              <h3 style={{ fontSize: '13px', margin: 0 }}>Strategy Signals</h3>
+              <h3 style={{ fontSize: '13px', margin: 0, fontWeight: 800 }}>Strategy Signals</h3>
+              <span className="tiny" style={{ background: '#1c342c', color: '#45e0ad', padding: '1px 6px', borderRadius: '10px', fontWeight: 700 }}>
+                {signalCount}
+              </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               {onToggleAutoPilot ? (
@@ -118,7 +110,8 @@ export default function FloatingSignalWidget({
                     cursor: 'pointer',
                     border: 0,
                     fontSize: '9px',
-                    padding: '3px 8px'
+                    padding: '3px 8px',
+                    fontWeight: 700
                   }}
                   title="Click to toggle AutoPilot / Semi-Auto mode"
                 >
@@ -132,13 +125,25 @@ export default function FloatingSignalWidget({
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
-                style={{ background: 'transparent', border: 0, color: 'var(--muted)', cursor: 'pointer', padding: '2px' }}
+                style={{
+                  background: 'rgba(255,255,255,0.06)',
+                  border: 0,
+                  borderRadius: '6px',
+                  color: 'var(--muted)',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
                 title="Minimize signals"
               >
                 <ChevronDown size={16} />
               </button>
             </div>
           </div>
+
+          {/* Scrollable Signal Content Container */}
+          <div style={{ overflowY: 'auto', flex: 1, padding: '12px 14px' }}>
 
           {feedback && (
             <div
@@ -236,6 +241,7 @@ export default function FloatingSignalWidget({
                 </button>
               </div>
             )}
+          </div>
           </div>
         </div>
       )}

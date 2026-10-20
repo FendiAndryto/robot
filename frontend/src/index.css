@@ -742,3 +742,46 @@ main.app-main {
 ::-webkit-scrollbar-thumb:hover {
   background: #2e4a57;
 }
+
+/* Floating Signals Responsive Docked Container */
+.floating-signals-container {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 991px) {
+  .floating-signals-container {
+    right: 12px;
+    bottom: calc(66px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.floating-signals-card {
+  width: 360px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 110px);
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 25, 32, 0.98);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(69, 224, 173, 0.45);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 0 25px rgba(69, 224, 173, 0.15);
+  border-radius: 16px;
+  overflow: hidden;
+  animation: pageIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (max-width: 640px) {
+  .floating-signals-card {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 130px);
+  }
+}
+

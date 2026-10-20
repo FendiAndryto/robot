@@ -8,6 +8,8 @@ export default function OrderDrawer({
   equity = 10000,
   currency = 'USD',
   isKillSwitchActive = false,
+  marketQuotes = [],
+  initialSymbol = 'EURUSD',
   onOrderSubmitted
 }) {
   useEffect(() => {
@@ -96,6 +98,8 @@ export default function OrderDrawer({
             equity={equity}
             currency={currency}
             isKillSwitchActive={isKillSwitchActive}
+            marketQuotes={marketQuotes}
+            initialSymbol={initialSymbol}
             onOrderSubmitted={() => {
               if (onOrderSubmitted) onOrderSubmitted();
               onClose();

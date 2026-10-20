@@ -22,6 +22,7 @@ export default function Dashboard({ user, onLogout }) {
   const [autopilotStatus, setAutopilotStatus] = useState(null);
 
   // Modals & Drawers state
+  const [tradeSymbol, setTradeSymbol] = useState('EURUSD');
   const [isOrderDrawerOpen, setIsOrderDrawerOpen] = useState(false);
   const [isKillSwitchModalOpen, setIsKillSwitchModalOpen] = useState(false);
   const [isMt5ModalOpen, setIsMt5ModalOpen] = useState(false);
@@ -207,6 +208,7 @@ export default function Dashboard({ user, onLogout }) {
           <MarketTab
             bridgeStatus={bridgeStatus}
             onOpenOrder={(sym) => {
+              if (sym) setTradeSymbol(sym);
               setIsOrderDrawerOpen(true);
             }}
           />
@@ -268,6 +270,8 @@ export default function Dashboard({ user, onLogout }) {
         equity={equity}
         currency={currency}
         isKillSwitchActive={isKillSwitchActive}
+        marketQuotes={bridgeStatus?.market_quotes || []}
+        initialSymbol={tradeSymbol}
         onOrderSubmitted={() => {
           fetchStatus();
           fetchSignals();
