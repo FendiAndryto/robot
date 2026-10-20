@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Robot Trading System"
 #property link      "https://github.com/FendiAndryto/robot"
-#property version   "1.20"
-#property description "FastAPI Web-to-MT5 Telemetry & Execution Bridge EA"
+#property version   "1.30"
+#property description "FastAPI Web-to-MT5 Telemetry & Execution Bridge EA v1.30"
 
 //--- Standard MT5 Trade Library
 #include <Trade\Trade.mqh>
@@ -61,7 +61,7 @@ void UpdateChartHUD(string status_text);
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(">>> [BridgeEA] Initializing MT5 FastAPI Bridge EA v1.20...");
+   Print(">>> [BridgeEA] Initializing MT5 FastAPI Bridge EA v1.30 (Telemetry v2)...");
    Print(">>> [BridgeEA] Target Backend: ", InpBackendUrl);
    PrintFormat(">>> [BridgeEA] Magic Number: %I64u, Deviation: %I64u pts", InpMagicNumber, InpDeviationPoints);
    
@@ -653,26 +653,25 @@ string BuildHeartbeatJson()
    string closedTradesJson = BuildClosedTradesJson();
    string candlesJson = BuildCandlesJson();
 
-   string json = StringFormat(
-      "{\"account_number\":%I64d,\"server\":\"%s\",\"currency\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"margin\":%.2f,\"free_margin\":%.2f,\"margin_level\":%.2f,\"floating_pnl\":%.2f,\"terminal_connected\":%s,\"open_positions\":%d,\"positions\":%s,\"market_quotes\":%s,\"closed_trades\":%s,\"candles\":%s,\"chart_symbol\":\"%s\",\"timestamp\":%I64d}",
-      login,
-      server,
-      currency,
-      balance,
-      equity,
-      margin,
-      free_margin,
-      margin_level,
-      profit,
-      connected ? "true" : "false",
-      positions,
-      positionsJson,
-      quotesJson,
-      closedTradesJson,
-      candlesJson,
-      EscapeJsonString(_Symbol),
-      timestamp
-   );
+   string json = "{"
+      + StringFormat("\"account_number\":%I64d,", login)
+      + "\"server\":\"" + server + "\","
+      + "\"currency\":\"" + currency + "\","
+      + StringFormat("\"balance\":%.2f,", balance)
+      + StringFormat("\"equity\":%.2f,", equity)
+      + StringFormat("\"margin\":%.2f,", margin)
+      + StringFormat("\"free_margin\":%.2f,", free_margin)
+      + StringFormat("\"margin_level\":%.2f,", margin_level)
+      + StringFormat("\"floating_pnl\":%.2f,", profit)
+      + "\"terminal_connected\":" + (connected ? "true," : "false,")
+      + StringFormat("\"open_positions\":%d,", positions)
+      + "\"positions\":" + positionsJson + ","
+      + "\"market_quotes\":" + quotesJson + ","
+      + "\"closed_trades\":" + closedTradesJson + ","
+      + "\"candles\":" + candlesJson + ","
+      + "\"chart_symbol\":\"" + EscapeJsonString(_Symbol) + "\","
+      + StringFormat("\"timestamp\":%I64d", timestamp)
+      + "}";
    
    return json;
 }
