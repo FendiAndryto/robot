@@ -286,6 +286,34 @@ string ExtractJsonValue(string jsonBlock, string key)
 }
 
 //+------------------------------------------------------------------+
+//| Auto-resolve symbol with broker suffix (e.g. XAUUSD -> XAUUSDm)   |
+//+------------------------------------------------------------------+
+string FindBrokerSymbol(string baseSym)
+{
+   if(SymbolSelect(baseSym, true)) return baseSym;
+   
+   // 1. Try chart symbol suffix
+   string currentSym = _Symbol;
+   int curLen = StringLen(currentSym);
+   if(curLen > 6)
+   {
+      string suffix = StringSubstr(currentSym, 6);
+      string candidate = baseSym + suffix;
+      if(SymbolSelect(candidate, true)) return candidate;
+   }
+   
+   // 2. Try common broker suffixes (Exness 'm', Raw 'c', Pro 'pro', etc.)
+   string commonSuffixes[8] = {"m", "c", "r", "pro", "raw", ".", "_i", "+"};
+   for(int i = 0; i < 8; i++)
+   {
+      string candidate = baseSym + commonSuffixes[i];
+      if(SymbolSelect(candidate, true)) return candidate;
+   }
+   
+   return baseSym;
+}
+
+//+------------------------------------------------------------------+
 //| Process and execute trade commands from backend response         |
 //+------------------------------------------------------------------+
 void ProcessBackendCommands(string responseJson)
@@ -316,6 +344,7 @@ void ProcessBackendCommands(string responseJson)
       string action = ExtractJsonValue(cmdItem, "action");
       string symbol = ExtractJsonValue(cmdItem, "symbol");
       if(symbol == "") symbol = _Symbol;
+      else symbol = FindBrokerSymbol(symbol);
       
       double volume = StringToDouble(ExtractJsonValue(cmdItem, "volume"));
       if(volume <= 0.0) volume = 0.01;
@@ -411,19 +440,20 @@ string BuildMarketQuotesJson()
    
    for(int i = 0; i < totalSym; i++)
    {
-      string sym = symbols[i];
-      StringTrimLeft(sym);
-      StringTrimRight(sym);
-      if(sym == "") continue;
+      string baseSym = symbols[i];
+      StringTrimLeft(baseSym);
+      StringTrimRight(baseSym);
+      if(baseSym == "") continue;
       
-      SymbolSelect(sym, true);
+      string actualSym = FindBrokerSymbol(baseSym);
+      SymbolSelect(actualSym, true);
       
-      double bid = SymbolInfoDouble(sym, SYMBOL_BID);
-      double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
+      double bid = SymbolInfoDouble(actualSym, SYMBOL_BID);
+      double ask = SymbolInfoDouble(actualSym, SYMBOL_ASK);
       if(bid <= 0.0) continue;
       
-      int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
-      int spread = (int)SymbolInfoInteger(sym, SYMBOL_SPREAD);
+      int digits = (int)SymbolInfoInteger(actualSym, SYMBOL_DIGITS);
+      int spread = (int)SymbolInfoInteger(actualSym, SYMBOL_SPREAD);
       
       double changePct = 0.0;
       double high = bid;
@@ -431,7 +461,7 @@ string BuildMarketQuotesJson()
       
       MqlRates d1Rates[];
       ArraySetAsSeries(d1Rates, true);
-      if(CopyRates(sym, PERIOD_D1, 0, 1, d1Rates) > 0)
+      if(CopyRates(actualSym, PERIOD_D1, 0, 1, d1Rates) > 0)
       {
          if(d1Rates[0].open > 0.0)
          {
@@ -444,7 +474,7 @@ string BuildMarketQuotesJson()
       if(count > 0) json += ",";
       json += StringFormat(
          "{\"symbol\":\"%s\",\"bid\":%.*f,\"ask\":%.*f,\"spread\":%d,\"digits\":%d,\"daily_change_pct\":%.2f,\"high\":%.*f,\"low\":%.*f}",
-         EscapeJsonString(sym),
+         EscapeJsonString(baseSym),
          digits, bid,
          digits, ask,
          spread,
