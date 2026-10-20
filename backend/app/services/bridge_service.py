@@ -144,7 +144,7 @@ class BridgeService:
                     self._closed_trades_map[t.ticket] = t
 
             if payload.chart_symbol:
-                self._chart_symbol = payload.chart_symbol.upper()
+                self._chart_symbol = payload.chart_symbol.strip()
 
             # Record equity snapshot (capped at 500 samples)
             if payload.equity > 0:

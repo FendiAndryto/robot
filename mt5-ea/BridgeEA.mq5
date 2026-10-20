@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Robot Trading System"
 #property link      "https://github.com/FendiAndryto/robot"
-#property version   "1.30"
-#property description "FastAPI Web-to-MT5 Telemetry & Execution Bridge EA v1.30"
+#property version   "1.40"
+#property description "FastAPI Web-to-MT5 Telemetry & Execution Bridge EA v1.40"
 
 //--- Standard MT5 Trade Library
 #include <Trade\Trade.mqh>
@@ -61,7 +61,7 @@ void UpdateChartHUD(string status_text);
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(">>> [BridgeEA] Initializing MT5 FastAPI Bridge EA v1.30 (Telemetry v2)...");
+   Print(">>> [BridgeEA] Initializing MT5 FastAPI Bridge EA v1.40 (Safe Filling & Symbol Matcher)...");
    Print(">>> [BridgeEA] Target Backend: ", InpBackendUrl);
    PrintFormat(">>> [BridgeEA] Magic Number: %I64u, Deviation: %I64u pts", InpMagicNumber, InpDeviationPoints);
    
@@ -288,29 +288,76 @@ string ExtractJsonValue(string jsonBlock, string key)
 //+------------------------------------------------------------------+
 //| Auto-resolve symbol with broker suffix (e.g. XAUUSD -> XAUUSDm)   |
 //+------------------------------------------------------------------+
+//| Configure safe trade filling mode supported by broker             |
+//+------------------------------------------------------------------+
+void SetSafeFillingType(string sym)
+{
+   uint filling = (uint)SymbolInfoInteger(sym, SYMBOL_FILLING_MODE);
+   if((filling & SYMBOL_FILLING_IOC) != 0)
+      g_trade.SetTypeFilling(ORDER_FILLING_IOC);
+   else if((filling & SYMBOL_FILLING_FOK) != 0)
+      g_trade.SetTypeFilling(ORDER_FILLING_FOK);
+   else
+      g_trade.SetTypeFilling(ORDER_FILLING_RETURN);
+}
+
+//+------------------------------------------------------------------+
+//| Find real broker symbol matching base symbol (handles suffixes)  |
+//+------------------------------------------------------------------+
 string FindBrokerSymbol(string baseSym)
 {
    if(SymbolSelect(baseSym, true)) return baseSym;
    
-   // 1. Try chart symbol suffix
-   string currentSym = _Symbol;
-   int curLen = StringLen(currentSym);
-   if(curLen > 6)
+   string upperTarget = baseSym;
+   StringToUpper(upperTarget);
+   
+   // Extract root 6-character currency/commodity if longer (e.g. XAUUSDM -> XAUUSD)
+   string coreSym = upperTarget;
+   if(StringLen(coreSym) > 6)
    {
-      string suffix = StringSubstr(currentSym, 6);
-      string candidate = baseSym + suffix;
-      if(SymbolSelect(candidate, true)) return candidate;
+      string s6 = StringSubstr(coreSym, 0, 6);
+      if(s6 == "XAUUSD" || s6 == "EURUSD" || s6 == "GBPUSD" || s6 == "USDJPY" || s6 == "BTCUSD" || s6 == "ETHUSD")
+      {
+         coreSym = s6;
+      }
    }
    
-   // 2. Try common broker suffixes (Exness 'm', Raw 'c', Pro 'pro', etc.)
-   string commonSuffixes[8] = {"m", "c", "r", "pro", "raw", ".", "_i", "+"};
-   for(int i = 0; i < 8; i++)
+   // 1. Direct case-insensitive match against all available symbols
+   int total = SymbolsTotal(false);
+   for(int i = 0; i < total; i++)
    {
-      string candidate = baseSym + commonSuffixes[i];
-      if(SymbolSelect(candidate, true)) return candidate;
+      string sName = SymbolName(i, false);
+      string upperS = sName;
+      StringToUpper(upperS);
+      if(upperS == upperTarget)
+      {
+         SymbolSelect(sName, true);
+         return sName;
+      }
    }
    
-   return baseSym;
+   // 2. Prefix match for broker with custom suffix (e.g. XAUUSDm, EURUSDm)
+   for(int i = 0; i < total; i++)
+   {
+      string sName = SymbolName(i, false);
+      string upperS = sName;
+      StringToUpper(upperS);
+      if(StringFind(upperS, coreSym) == 0 && StringLen(upperS) <= StringLen(coreSym) + 4)
+      {
+         SymbolSelect(sName, true);
+         return sName;
+      }
+   }
+   
+   // 3. Fallback to chart symbol if compatible
+   string chartUpper = _Symbol;
+   StringToUpper(chartUpper);
+   if(StringFind(chartUpper, coreSym) >= 0)
+   {
+      return _Symbol;
+   }
+   
+   return _Symbol;
 }
 
 //+------------------------------------------------------------------+
@@ -369,8 +416,8 @@ void ProcessBackendCommands(string responseJson)
          if(tp > 0.0) tp = NormalizeDouble(tp, digits);
       }
       
-      // Dynamically configure filling mode for target symbol
-      g_trade.SetTypeFillingBySymbol(symbol);
+      // Dynamically configure safe filling mode for target symbol
+      SetSafeFillingType(symbol);
                   
       if(action == "BUY")
       {
