@@ -240,6 +240,26 @@ def test_scalping_spread_guard_blocks_signal():
     assert sig_ok is not None
     assert sig_ok.action == "BUY"
 
+    # XAUUSD: 200 points is normal and should pass (< 350 max)
+    strategy_engine.reset_state()
+    sig_gold = strategy_engine.evaluate_candles(
+        candles=candles,
+        symbol="XAUUSD",
+        current_spread=200,
+        ignore_session_filter=True
+    )
+    assert sig_gold is not None
+
+    # XAUUSD: 400 points is abnormal and should be blocked (> 350 max)
+    strategy_engine.reset_state()
+    sig_gold_high = strategy_engine.evaluate_candles(
+        candles=candles,
+        symbol="XAUUSD",
+        current_spread=400,
+        ignore_session_filter=True
+    )
+    assert sig_gold_high is None
+
 
 def test_scalping_m5_confluence():
     m15_candles = []

@@ -89,8 +89,13 @@ class StrategyEngine:
         if not settings.STRATEGY_ENABLED:
             return None
 
+        sym = symbol.strip().upper()
+
         # 1. Spread Guard: protect scalper against excessive spread or news spikes
-        if current_spread is not None and current_spread > settings.MAX_SPREAD_POINTS:
+        # Forex 5-digit: 35 points = 3.5 pips.
+        # Metals/Crypto: brokers use smaller point increments (e.g., 3-digit Gold has spread ~150-300 pts = $0.15-$0.30)
+        max_allowed_spread = settings.MAX_SPREAD_POINTS * 10 if ("XAU" in sym or "GOLD" in sym or "BTC" in sym) else settings.MAX_SPREAD_POINTS
+        if current_spread is not None and current_spread > max_allowed_spread:
             return None
 
         # 2. Session Filter: prioritize high-liquidity London/NY overlap, skip rollover gap
@@ -105,7 +110,6 @@ class StrategyEngine:
             if not in_session:
                 return None
 
-        sym = symbol.strip()
         min_bars = max(settings.STRATEGY_EMA_SLOW, settings.STRATEGY_RSI_PERIOD) + 5
 
         # Multi-timeframe Scalping: M15 Trend Bias + M5 Entry Trigger
