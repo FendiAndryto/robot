@@ -80,7 +80,8 @@ class HeartbeatPayload(BaseModel):
     positions: List[PositionItem] = Field(default_factory=list, description="Active open positions list")
     market_quotes: List[MarketQuoteItem] = Field(default_factory=list, description="Live quotes for monitored symbols")
     closed_trades: List[ClosedTradeItem] = Field(default_factory=list, description="Recent closed trades from MT5 history")
-    candles: List[Any] = Field(default_factory=list, description="Recent M15 candles for chart symbol")
+    candles: List[Any] = Field(default_factory=list, description="Recent M15 candles for trend bias")
+    candles_m5: List[Any] = Field(default_factory=list, description="Recent M5 candles for scalping trigger")
     chart_symbol: Optional[str] = Field(None, description="Current symbol on active MT5 chart")
     timestamp: int = Field(..., description="Unix timestamp sent from terminal")
 

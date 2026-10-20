@@ -177,24 +177,36 @@ class BridgeService:
             self._pending_commands.clear()
 
         # Real-time strategy evaluation on real candles sent from MT5
-        if payload.candles and len(payload.candles) >= 20:
+        if (payload.candles and len(payload.candles) >= 20) or (payload.candles_m5 and len(payload.candles_m5) >= 20):
             try:
                 from app.services.strategy_engine import strategy_engine
                 from app.services.autopilot_service import autopilot_service
                 from app.models.strategy import CandleData
 
-                parsed_candles = []
+                parsed_candles_m15 = []
                 for c in payload.candles:
                     if isinstance(c, CandleData):
-                        parsed_candles.append(c)
+                        parsed_candles_m15.append(c)
                     elif isinstance(c, dict):
-                        parsed_candles.append(CandleData(**c))
+                        parsed_candles_m15.append(CandleData(**c))
+
+                parsed_candles_m5 = []
+                for c in payload.candles_m5:
+                    if isinstance(c, CandleData):
+                        parsed_candles_m5.append(c)
+                    elif isinstance(c, dict):
+                        parsed_candles_m5.append(CandleData(**c))
 
                 sym_eval = self._chart_symbol or (payload.positions[0].symbol if payload.positions else "XAUUSD")
+                cur_quote = self._market_quotes.get(sym_eval.upper())
+                current_spread = cur_quote.spread if cur_quote else None
+
                 generated_signal = strategy_engine.evaluate_candles(
                     symbol=sym_eval,
-                    candles=parsed_candles,
-                    live_equity=payload.equity
+                    candles=parsed_candles_m15,
+                    candles_m5=parsed_candles_m5 if parsed_candles_m5 else None,
+                    live_equity=payload.equity,
+                    current_spread=current_spread
                 )
 
                 if generated_signal and autopilot_service.is_autopilot_active():

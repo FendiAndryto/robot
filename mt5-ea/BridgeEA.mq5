@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Robot Trading System"
 #property link      "https://github.com/FendiAndryto/robot"
-#property version   "1.40"
-#property description "FastAPI Web-to-MT5 Telemetry & Execution Bridge EA v1.40"
+#property version   "1.50"
+#property description "FastAPI Web-to-MT5 Telemetry & Scalping Protection EA v1.50"
 
 //--- Standard MT5 Trade Library
 #include <Trade\Trade.mqh>
@@ -41,6 +41,14 @@ input int    InpHistoryDays       = 30;                                        /
 input int    InpHeartbeatInterval = 1;                                         // Heartbeat interval in seconds
 input bool   InpVerboseLog        = false;                                     // Print detailed logs to Experts tab
 
+input group "--- Scalping Protection Settings ---"
+input bool   InpEnableBEP         = true;                  // Enable Auto-Breakeven (Risk-Free)
+input int    InpBEPTriggerPoints  = 120;                   // Profit points to move SL to BEP (12 pips)
+input int    InpBEPBufferPoints   = 10;                    // Lock-in points above open price (1 pip)
+input bool   InpEnableTrailing    = true;                  // Enable Trailing Stop
+input int    InpTrailingDistance  = 150;                   // Trailing Stop distance in points (15 pips)
+input int    InpTrailingStep      = 30;                    // Trailing Stop step in points (3 pips)
+
 input group "--- Trade Settings ---"
 input ulong  InpMagicNumber       = 778899;                // Magic Number for orders
 input ulong  InpDeviationPoints   = 20;                    // Maximum slippage in points
@@ -55,20 +63,23 @@ string   g_status_msg = "Initializing...";
 void SendHeartbeat();
 void ProcessBackendCommands(string responseJson);
 void UpdateChartHUD(string status_text);
+void ManagePositionsProtection();
+void SetSafeFillingType(string sym);
+string FindBrokerSymbol(string baseSym);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(">>> [BridgeEA] Initializing MT5 FastAPI Bridge EA v1.40 (Safe Filling & Symbol Matcher)...");
+   Print(">>> [BridgeEA] Initializing MT5 FastAPI Bridge EA v1.50 (Scalping Protection & Multi-TF)...");
    Print(">>> [BridgeEA] Target Backend: ", InpBackendUrl);
    PrintFormat(">>> [BridgeEA] Magic Number: %I64u, Deviation: %I64u pts", InpMagicNumber, InpDeviationPoints);
    
    // Configure trade executor
    g_trade.SetExpertMagicNumber(InpMagicNumber);
    g_trade.SetDeviationInPoints(InpDeviationPoints);
-   g_trade.SetTypeFillingBySymbol(_Symbol);
+   SetSafeFillingType(_Symbol);
    
    // Set timer for periodic heartbeat
    EventSetTimer(MathMax(1, InpHeartbeatInterval));
@@ -97,7 +108,16 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+   ManagePositionsProtection();
    SendHeartbeat();
+}
+
+//+------------------------------------------------------------------+
+//| Tick event function (ultra-fast trailing stop & BEP execution)   |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+   ManagePositionsProtection();
 }
 
 //+------------------------------------------------------------------+
@@ -590,13 +610,113 @@ string BuildClosedTradesJson()
 }
 
 //+------------------------------------------------------------------+
-//| Build JSON array of recent M15 candles for chart symbol         |
+//| Auto-Breakeven & Dynamic Trailing Stop for Open Positions        |
 //+------------------------------------------------------------------+
-string BuildCandlesJson()
+void ManagePositionsProtection()
+{
+   if(!InpEnableBEP && !InpEnableTrailing) return;
+
+   int total = PositionsTotal();
+   for(int i = total - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      
+      long posMagic = PositionGetInteger(POSITION_MAGIC);
+      if(InpMagicNumber != 0 && posMagic != 0 && posMagic != (long)InpMagicNumber) continue;
+      
+      string posSymbol = PositionGetString(POSITION_SYMBOL);
+      long posType = PositionGetInteger(POSITION_TYPE);
+      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+      double currentSL = PositionGetDouble(POSITION_SL);
+      double currentTP = PositionGetDouble(POSITION_TP);
+      double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+      
+      double point = SymbolInfoDouble(posSymbol, SYMBOL_POINT);
+      int digits = (int)SymbolInfoInteger(posSymbol, SYMBOL_DIGITS);
+      if(point <= 0.0) continue;
+
+      if(posType == POSITION_TYPE_BUY)
+      {
+         double profitPoints = (currentPrice - openPrice) / point;
+         
+         // 1. Auto-Breakeven check
+         if(InpEnableBEP && profitPoints >= InpBEPTriggerPoints)
+         {
+            double newSL = NormalizeDouble(openPrice + (InpBEPBufferPoints * point), digits);
+            if(currentSL < newSL - (point * 0.5) || currentSL == 0.0)
+            {
+               ResetLastError();
+               if(g_trade.PositionModify(ticket, newSL, currentTP))
+               {
+                  PrintFormat(">>> [BridgeEA] Auto-BEP BUY #%I64u: SL moved to %.5f (+%d pts)",
+                              ticket, newSL, InpBEPBufferPoints);
+                  currentSL = newSL;
+               }
+            }
+         }
+         
+         // 2. Trailing Stop check
+         if(InpEnableTrailing && profitPoints >= InpTrailingDistance)
+         {
+            double proposedSL = NormalizeDouble(currentPrice - (InpTrailingDistance * point), digits);
+            if(proposedSL > currentSL + (InpTrailingStep * point))
+            {
+               ResetLastError();
+               if(g_trade.PositionModify(ticket, proposedSL, currentTP))
+               {
+                  PrintFormat(">>> [BridgeEA] Trailing Stop BUY #%I64u: SL trailed to %.5f",
+                              ticket, proposedSL);
+               }
+            }
+         }
+      }
+      else if(posType == POSITION_TYPE_SELL)
+      {
+         double profitPoints = (openPrice - currentPrice) / point;
+         
+         // 1. Auto-Breakeven check
+         if(InpEnableBEP && profitPoints >= InpBEPTriggerPoints)
+         {
+            double newSL = NormalizeDouble(openPrice - (InpBEPBufferPoints * point), digits);
+            if(currentSL > newSL + (point * 0.5) || currentSL == 0.0)
+            {
+               ResetLastError();
+               if(g_trade.PositionModify(ticket, newSL, currentTP))
+               {
+                  PrintFormat(">>> [BridgeEA] Auto-BEP SELL #%I64u: SL moved to %.5f (+%d pts)",
+                              ticket, newSL, InpBEPBufferPoints);
+                  currentSL = newSL;
+               }
+            }
+         }
+         
+         // 2. Trailing Stop check
+         if(InpEnableTrailing && profitPoints >= InpTrailingDistance)
+         {
+            double proposedSL = NormalizeDouble(currentPrice + (InpTrailingDistance * point), digits);
+            if(currentSL == 0.0 || proposedSL < currentSL - (InpTrailingStep * point))
+            {
+               ResetLastError();
+               if(g_trade.PositionModify(ticket, proposedSL, currentTP))
+               {
+                  PrintFormat(">>> [BridgeEA] Trailing Stop SELL #%I64u: SL trailed to %.5f",
+                              ticket, proposedSL);
+               }
+            }
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Build JSON array of recent candles for specified timeframe       |
+//+------------------------------------------------------------------+
+string BuildCandlesJson(ENUM_TIMEFRAMES tf = PERIOD_M15)
 {
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   int copied = CopyRates(_Symbol, PERIOD_M15, 0, 35, rates);
+   int copied = CopyRates(_Symbol, tf, 0, 35, rates);
    if(copied <= 0) return "[]";
    
    string json = "[";
@@ -698,7 +818,8 @@ string BuildHeartbeatJson()
 
    string quotesJson = BuildMarketQuotesJson();
    string closedTradesJson = BuildClosedTradesJson();
-   string candlesJson = BuildCandlesJson();
+   string candlesM15Json = BuildCandlesJson(PERIOD_M15);
+   string candlesM5Json = BuildCandlesJson(PERIOD_M5);
 
    string json = "{"
       + StringFormat("\"account_number\":%I64d,", login)
@@ -715,7 +836,8 @@ string BuildHeartbeatJson()
       + "\"positions\":" + positionsJson + ","
       + "\"market_quotes\":" + quotesJson + ","
       + "\"closed_trades\":" + closedTradesJson + ","
-      + "\"candles\":" + candlesJson + ","
+      + "\"candles\":" + candlesM15Json + ","
+      + "\"candles_m5\":" + candlesM5Json + ","
       + "\"chart_symbol\":\"" + EscapeJsonString(_Symbol) + "\","
       + StringFormat("\"timestamp\":%I64d", timestamp)
       + "}";

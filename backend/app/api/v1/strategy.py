@@ -78,7 +78,12 @@ async def evaluate_candles(
     candles: List[CandleData]
 ):
     live_equity = bridge_service.get_equity()
-    return strategy_engine.evaluate_candles(symbol=symbol, candles=candles, live_equity=live_equity)
+    return strategy_engine.evaluate_candles(
+        symbol=symbol,
+        candles=candles,
+        live_equity=live_equity,
+        ignore_session_filter=True
+    )
 
 
 @router.get(

@@ -25,21 +25,24 @@ class Settings(BaseSettings):
     DEFAULT_RISK_PER_TRADE_PERCENT: float = 1.0
     MAX_RISK_PER_TRADE_PERCENT: float = 10.0
     MAX_DAILY_DRAWDOWN_PERCENT: float = 3.0
-    MAX_SPREAD_POINTS: int = 30
+    MAX_SPREAD_POINTS: int = 35
     MIN_LOT_SIZE: float = 0.01
     MAX_LOT_SIZE: float = 100.0
 
-    # Strategy Engine Defaults
+    # Scalping & Day Trading Strategy Engine Defaults
     STRATEGY_ENABLED: bool = True
     STRATEGY_EMA_FAST: int = 9
     STRATEGY_EMA_SLOW: int = 21
     STRATEGY_RSI_PERIOD: int = 14
-    STRATEGY_RSI_OVERSOLD: float = 30.0
-    STRATEGY_RSI_OVERBOUGHT: float = 70.0
-    STRATEGY_DEFAULT_SL_PIPS: float = 25.0
-    STRATEGY_DEFAULT_RR_RATIO: float = 2.0
+    STRATEGY_RSI_OVERSOLD: float = 32.0
+    STRATEGY_RSI_OVERBOUGHT: float = 68.0
+    STRATEGY_DEFAULT_SL_PIPS: float = 15.0
+    STRATEGY_DEFAULT_RR_RATIO: float = 1.8
     STRATEGY_SIGNAL_TTL_SECONDS: int = 300
     STRATEGY_MONITORED_SYMBOLS: str = "EURUSD,GBPUSD,USDJPY,XAUUSD"
+    STRATEGY_ENABLE_SESSION_FILTER: bool = True
+    STRATEGY_SESSION_START_HOUR_UTC: int = 6   # 13:00 WIB (London Open)
+    STRATEGY_SESSION_END_HOUR_UTC: int = 21    # 04:00 WIB (Before Rollover Blackout)
 
     # Auto-Pilot Mode & Drawdown Guard
     AUTOPILOT_DEFAULT_ENABLED: bool = False

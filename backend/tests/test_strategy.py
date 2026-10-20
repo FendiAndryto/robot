@@ -204,3 +204,83 @@ def test_strategy_auth_guards():
     # Attempting to dismiss without auth -> 401
     resp = client.post("/api/v1/strategy/signals/fake_id/dismiss")
     assert resp.status_code == 401
+
+
+def test_scalping_spread_guard_blocks_signal():
+    candles = []
+    price = 1.08000
+    for i in range(35):
+        step = 0.00010 if (i % 2 == 0) else -0.00008
+        price += step
+        candles.append({
+            "time": 1700000000 + (i * 60),
+            "open": round(price - 0.00005, 5),
+            "high": round(price + 0.0001, 5),
+            "low": round(price - 0.0001, 5),
+            "close": round(price, 5),
+            "volume": 100.0
+        })
+
+    # High spread (e.g. 60 points > max 35) must block entry
+    sig = strategy_engine.evaluate_candles(
+        candles=candles,
+        symbol="EURUSD",
+        current_spread=60,
+        ignore_session_filter=True
+    )
+    assert sig is None
+
+    # Low spread (e.g. 15 points <= 35) should succeed
+    sig_ok = strategy_engine.evaluate_candles(
+        candles=candles,
+        symbol="EURUSD",
+        current_spread=15,
+        ignore_session_filter=True
+    )
+    assert sig_ok is not None
+    assert sig_ok.action == "BUY"
+
+
+def test_scalping_m5_confluence():
+    m15_candles = []
+    price = 1.08000
+    for i in range(35):
+        step = 0.00010 if (i % 2 == 0) else -0.00008
+        price += step
+        m15_candles.append({
+            "time": 1700000000 + (i * 900),
+            "open": round(price - 0.00005, 5),
+            "high": round(price + 0.0001, 5),
+            "low": round(price - 0.0001, 5),
+            "close": round(price, 5),
+            "volume": 100.0
+        })
+
+    # M5 series also in strong bullish alignment
+    m5_candles = []
+    price_m5 = 1.08000
+    for i in range(30):
+        step = 0.00008 if (i % 2 == 0) else -0.00005
+        price_m5 += step
+        m5_candles.append({
+            "time": 1700000000 + (i * 300),
+            "open": round(price_m5 - 0.00003, 5),
+            "high": round(price_m5 + 0.00008, 5),
+            "low": round(price_m5 - 0.00005, 5),
+            "close": round(price_m5, 5),
+            "volume": 50.0
+        })
+
+    sig = strategy_engine.evaluate_candles(
+        candles=m15_candles,
+        symbol="EURUSD",
+        candles_m5=m5_candles,
+        current_spread=12,
+        ignore_session_filter=True
+    )
+    assert sig is not None
+    assert sig.action == "BUY"
+    # Verify scalping SL is 15 pips
+    expected_sl = round(sig.entry_price - (15.0 * 0.0001), 5)
+    assert abs(sig.sl - expected_sl) < 1e-4
+

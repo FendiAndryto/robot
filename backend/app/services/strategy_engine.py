@@ -1,6 +1,7 @@
 import time
 import uuid
 import threading
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from fastapi import HTTPException, status
 from app.core.config import settings
@@ -80,17 +81,40 @@ class StrategyEngine:
         self,
         symbol: str,
         candles: List[CandleData],
-        live_equity: Optional[float] = None
+        candles_m5: Optional[List[CandleData]] = None,
+        live_equity: Optional[float] = None,
+        current_spread: Optional[int] = None,
+        ignore_session_filter: bool = False
     ) -> Optional[SignalItem]:
         if not settings.STRATEGY_ENABLED:
             return None
 
-        sym = symbol.upper().strip()
-        min_bars = max(settings.STRATEGY_EMA_SLOW, settings.STRATEGY_RSI_PERIOD) + 5
-        if len(candles) < min_bars:
+        # 1. Spread Guard: protect scalper against excessive spread or news spikes
+        if current_spread is not None and current_spread > settings.MAX_SPREAD_POINTS:
             return None
 
-        closes = [c.close for c in candles]
+        # 2. Session Filter: prioritize high-liquidity London/NY overlap, skip rollover gap
+        if not ignore_session_filter and settings.STRATEGY_ENABLE_SESSION_FILTER:
+            current_hour_utc = datetime.now(timezone.utc).hour
+            start_h = settings.STRATEGY_SESSION_START_HOUR_UTC
+            end_h = settings.STRATEGY_SESSION_END_HOUR_UTC
+            if start_h <= end_h:
+                in_session = start_h <= current_hour_utc < end_h
+            else:
+                in_session = current_hour_utc >= start_h or current_hour_utc < end_h
+            if not in_session:
+                return None
+
+        sym = symbol.strip()
+        min_bars = max(settings.STRATEGY_EMA_SLOW, settings.STRATEGY_RSI_PERIOD) + 5
+
+        # Multi-timeframe Scalping: M15 Trend Bias + M5 Entry Trigger
+        use_m5 = candles_m5 is not None and len(candles_m5) >= min_bars
+        target_candles = candles_m5 if use_m5 else candles
+        if len(target_candles) < min_bars:
+            return None
+
+        closes = [c.close if hasattr(c, "close") else c["close"] for c in target_candles]
         ema_fast = self.calculate_ema(closes, settings.STRATEGY_EMA_FAST)
         ema_slow = self.calculate_ema(closes, settings.STRATEGY_EMA_SLOW)
         rsi = self.calculate_rsi(closes, settings.STRATEGY_RSI_PERIOD)
@@ -98,39 +122,50 @@ class StrategyEngine:
         if not ema_fast or not ema_slow or not rsi:
             return None
 
-        # Align latest values
         fast_now = ema_fast[-1]
         slow_now = ema_slow[-1]
         rsi_now = rsi[-1]
         price_now = closes[-1]
 
-        # Check for Bullish / Bearish Confluence
+        # Check Higher Timeframe (M15) Trend Bias if candles provided
+        m15_bullish = True
+        m15_bearish = True
+        if use_m5 and len(candles) >= min_bars:
+            m15_closes = [c.close if hasattr(c, "close") else c["close"] for c in candles]
+            m15_fast = self.calculate_ema(m15_closes, settings.STRATEGY_EMA_FAST)
+            m15_slow = self.calculate_ema(m15_closes, settings.STRATEGY_EMA_SLOW)
+            if m15_fast and m15_slow:
+                m15_bullish = m15_fast[-1] > m15_slow[-1]
+                m15_bearish = m15_fast[-1] < m15_slow[-1]
+
         action = None
         reason = ""
         trend = "NEUTRAL"
 
-        is_bullish_trend = fast_now > slow_now
-        is_bearish_trend = fast_now < slow_now
+        is_bullish_trigger = fast_now > slow_now and m15_bullish
+        is_bearish_trigger = fast_now < slow_now and m15_bearish
 
-        if is_bullish_trend:
+        if is_bullish_trigger:
             trend = "BULLISH"
-            # RSI confirms bullish momentum (not overbought, holding healthy momentum)
             if settings.STRATEGY_RSI_OVERSOLD <= rsi_now <= settings.STRATEGY_RSI_OVERBOUGHT:
                 action = "BUY"
                 reason = (
-                    f"EMA Trend Confirmation: Fast EMA({settings.STRATEGY_EMA_FAST}) {fast_now:.5f} > "
-                    f"Slow EMA({settings.STRATEGY_EMA_SLOW}) {slow_now:.5f} with RSI({settings.STRATEGY_RSI_PERIOD}) "
-                    f"Bullish Momentum at {rsi_now:.1f}"
+                    f"Scalp Confluence: M15 Bullish Bias + M5 EMA({settings.STRATEGY_EMA_FAST}) > "
+                    f"EMA({settings.STRATEGY_EMA_SLOW}) with RSI @ {rsi_now:.1f}"
+                    if use_m5 else
+                    f"Trend Confluence: EMA({settings.STRATEGY_EMA_FAST}) {fast_now:.5f} > "
+                    f"EMA({settings.STRATEGY_EMA_SLOW}) {slow_now:.5f} with RSI @ {rsi_now:.1f}"
                 )
-        elif is_bearish_trend:
+        elif is_bearish_trigger:
             trend = "BEARISH"
-            # RSI confirms bearish momentum (not oversold, holding healthy momentum)
             if settings.STRATEGY_RSI_OVERSOLD <= rsi_now <= settings.STRATEGY_RSI_OVERBOUGHT:
                 action = "SELL"
                 reason = (
-                    f"EMA Trend Confirmation: Fast EMA({settings.STRATEGY_EMA_FAST}) {fast_now:.5f} < "
-                    f"Slow EMA({settings.STRATEGY_EMA_SLOW}) {slow_now:.5f} with RSI({settings.STRATEGY_RSI_PERIOD}) "
-                    f"Bearish Momentum at {rsi_now:.1f}"
+                    f"Scalp Confluence: M15 Bearish Bias + M5 EMA({settings.STRATEGY_EMA_FAST}) < "
+                    f"EMA({settings.STRATEGY_EMA_SLOW}) with RSI @ {rsi_now:.1f}"
+                    if use_m5 else
+                    f"Trend Confluence: EMA({settings.STRATEGY_EMA_FAST}) {fast_now:.5f} < "
+                    f"EMA({settings.STRATEGY_EMA_SLOW}) {slow_now:.5f} with RSI @ {rsi_now:.1f}"
                 )
 
         if not action:
