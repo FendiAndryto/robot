@@ -12,8 +12,15 @@ class PositionItem(BaseModel):
     sl: float = Field(0.0, description="Stop Loss Price")
     tp: float = Field(0.0, description="Take Profit Price")
     pnl: float = Field(0.0, description="Floating Profit and Loss")
+    profit: Optional[float] = Field(None, description="Floating Profit and Loss alias")
     open_time: int = Field(0, description="Unix timestamp when order was opened")
     magic: int = Field(0, description="Expert Advisor Magic Number")
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.profit is None:
+            self.profit = self.pnl
+        elif self.pnl == 0.0 and self.profit != 0.0:
+            self.pnl = self.profit
 
 
 class MarketQuoteItem(BaseModel):

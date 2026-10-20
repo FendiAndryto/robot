@@ -40,9 +40,10 @@ export default function HomeTab({
   const currency = metrics.currency || 'USD';
   const balance = metrics.balance ?? 0;
   const equity = metrics.equity ?? 0;
-  const floatingPnl = metrics.floating_pnl ?? 0;
-  const openPositionsCount = metrics.open_positions ?? 0;
   const positions = bridgeStatus?.positions || metrics.positions || [];
+  const openPositionsCount = positions.length > 0 ? positions.length : (metrics.open_positions ?? 0);
+  const calculatedFloatingPnl = positions.reduce((acc, p) => acc + (p.pnl !== undefined ? p.pnl : (p.profit ?? 0)), 0);
+  const floatingPnl = positions.length > 0 ? calculatedFloatingPnl : (metrics.floating_pnl ?? 0);
   const marketQuotes = bridgeStatus?.market_quotes || [];
 
   React.useEffect(() => {
@@ -388,7 +389,7 @@ export default function HomeTab({
         {positions.length > 0 ? (
           positions.map((pos) => {
             const isBuy = String(pos.type || '').toUpperCase() === 'BUY' || pos.type === 0;
-            const profit = pos.profit ?? 0;
+            const profit = pos.pnl !== undefined ? pos.pnl : (pos.profit ?? 0);
             return (
               <div key={pos.ticket} className="row">
                 <div className="coin">
@@ -406,6 +407,7 @@ export default function HomeTab({
                   </div>
                   <div className="rowsub">
                     {pos.volume} lot · Entry @ {pos.open_price}
+                    {pos.current_price ? ` · Now @ ${pos.current_price}` : ''}
                     {pos.sl ? ` · SL ${pos.sl}` : ''}
                     {pos.tp ? ` · TP ${pos.tp}` : ''}
                   </div>

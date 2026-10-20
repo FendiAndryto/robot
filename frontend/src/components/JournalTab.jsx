@@ -8,7 +8,7 @@ const formatCurrency = (val, currency = 'USD') => {
   return `${prefix}$${Math.abs(val).toFixed(2)}`;
 };
 
-export default function JournalTab({ onNavigateAI }) {
+export default function JournalTab({ activeTab, closedTradesCount, onNavigateAI }) {
   const [historyData, setHistoryData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
@@ -16,7 +16,8 @@ export default function JournalTab({ onNavigateAI }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchHistory = async () => {
+  const fetchHistory = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
     try {
       const data = await api.getTradeHistory();
       setHistoryData(data);
@@ -28,13 +29,24 @@ export default function JournalTab({ onNavigateAI }) {
     }
   };
 
+  // Immediate reactive fetch when Journal tab becomes active OR when new closed trade arrives
   useEffect(() => {
-    fetchHistory();
-  }, []);
+    if (activeTab === 'journal' || !activeTab) {
+      fetchHistory();
+    }
+  }, [activeTab, closedTradesCount]);
+
+  // Periodic real-time background sync while actively viewing Journal tab
+  useEffect(() => {
+    if (activeTab !== 'journal') return;
+    const timer = setInterval(() => {
+      fetchHistory();
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [activeTab]);
 
   const handleRefresh = () => {
-    setRefreshing(true);
-    fetchHistory();
+    fetchHistory(true);
   };
 
   const trades = historyData?.trades || [];

@@ -241,20 +241,11 @@ class StrategyEngine:
         with self._lock:
             self._signals[signal_id] = signal
 
-        # Autonomous Auto-Pilot Execution Hook
-        from app.services.autopilot_service import autopilot_service
-        is_auto_active = autopilot_service.is_autopilot_active() and not autopilot_service.is_drawdown_locked()
-        if is_auto_active:
-            try:
-                self.approve_signal(signal_id)
-                autopilot_service.increment_auto_executed_count()
-                signal.reason += " [AUTOPILOT AUTO-EXECUTED]"
-            except Exception:
-                pass
-
         # Dispatch Telegram signal alert
         try:
             from app.services.telegram_service import telegram_service
+            from app.services.autopilot_service import autopilot_service
+            is_auto_active = autopilot_service.is_autopilot_active() and not autopilot_service.is_drawdown_locked()
             telegram_service.send_signal_alert_background({
                 "action": signal.action,
                 "symbol": signal.symbol,

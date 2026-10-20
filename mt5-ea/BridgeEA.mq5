@@ -42,12 +42,12 @@ input int    InpHeartbeatInterval = 1;                                         /
 input bool   InpVerboseLog        = false;                                     // Print detailed logs to Experts tab
 
 input group "--- Scalping Protection Settings ---"
-input bool   InpEnableBEP         = true;                  // Enable Auto-Breakeven (Risk-Free)
-input int    InpBEPTriggerPoints  = 120;                   // Profit points to move SL to BEP (12 pips)
-input int    InpBEPBufferPoints   = 10;                    // Lock-in points above open price (1 pip)
-input bool   InpEnableTrailing    = true;                  // Enable Trailing Stop
-input int    InpTrailingDistance  = 150;                   // Trailing Stop distance in points (15 pips)
-input int    InpTrailingStep      = 30;                    // Trailing Stop step in points (3 pips)
+input bool   InpEnableBEP         = false;                 // Enable Auto-Breakeven (Default: false to allow full TP runs)
+input int    InpBEPTriggerPips    = 18;                    // Profit pips to move SL to BEP (18 pips = $1.80 on Gold)
+input int    InpBEPBufferPips     = 2;                     // Lock-in pips above open price (2 pips = $0.20 on Gold)
+input bool   InpEnableTrailing    = false;                 // Enable Trailing Stop (Default: false)
+input int    InpTrailingDistPips  = 20;                    // Trailing Stop distance in pips (20 pips)
+input int    InpTrailingStepPips  = 5;                     // Trailing Stop step in pips (5 pips)
 
 input group "--- Trade Settings ---"
 input ulong  InpMagicNumber       = 778899;                // Magic Number for orders
@@ -66,6 +66,8 @@ void UpdateChartHUD(string status_text);
 void ManagePositionsProtection();
 void SetSafeFillingType(string sym);
 string FindBrokerSymbol(string baseSym);
+int GetPointsPerPip(string sym);
+void GetDealPositionOpenDetails(ulong posId, double &openPrice, long &openTime);
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -557,6 +559,60 @@ string BuildMarketQuotesJson()
 }
 
 //+------------------------------------------------------------------+
+//| Calculate Points Per Pip for symbol (Forex, Metals, Crypto)      |
+//+------------------------------------------------------------------+
+int GetPointsPerPip(string sym)
+{
+   int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+   string upper = sym;
+   StringToUpper(upper);
+   
+   if(StringFind(upper, "XAU") >= 0 || StringFind(upper, "GOLD") >= 0)
+   {
+      // Gold 1 pip = $0.10. 
+      // In 3-digit broker (point = 0.001): 1 pip = 100 points ($0.10)
+      // In 2-digit broker (point = 0.01): 1 pip = 10 points ($0.10)
+      return (digits == 3 ? 100 : 10);
+   }
+   if(StringFind(upper, "BTC") >= 0)
+   {
+      // BTC 1 pip = $1.00. 
+      // In 2-digit broker (point = 0.01): 1 pip = 100 points ($1.00)
+      return (digits == 2 ? 100 : 1);
+   }
+   if(digits == 3 || digits == 5)
+   {
+      // 3 or 5 digit Forex pairs: 1 pip = 10 points
+      return 10;
+   }
+   return 1;
+}
+
+//+------------------------------------------------------------------+
+//| Get Entry Price and Entry Time for a closed position's deals     |
+//+------------------------------------------------------------------+
+void GetDealPositionOpenDetails(ulong posId, double &openPrice, long &openTime)
+{
+   if(posId <= 0) return;
+   
+   int total = HistoryDealsTotal();
+   for(int i = 0; i < total; i++)
+   {
+      ulong t = HistoryDealGetTicket(i);
+      if(t > 0 && (ulong)HistoryDealGetInteger(t, DEAL_POSITION_ID) == posId)
+      {
+         long entry = HistoryDealGetInteger(t, DEAL_ENTRY);
+         if(entry == DEAL_ENTRY_IN)
+         {
+            openPrice = HistoryDealGetDouble(t, DEAL_PRICE);
+            openTime = HistoryDealGetInteger(t, DEAL_TIME);
+            return;
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Build JSON array of closed trade history from MT5 deals          |
 //+------------------------------------------------------------------+
 string BuildClosedTradesJson()
@@ -587,6 +643,14 @@ string BuildClosedTradesJson()
       long dealTime = HistoryDealGetInteger(dealTicket, DEAL_TIME);
       long dealMagic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
       
+      ulong posId = (ulong)HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+      double openPrice = dealPrice;
+      long openTime = dealTime;
+      if(posId > 0)
+      {
+         GetDealPositionOpenDetails(posId, openPrice, openTime);
+      }
+      
       string origType = (dealType == DEAL_TYPE_SELL ? "BUY" : "SELL");
       
       if(count > 0) json += ",";
@@ -596,10 +660,10 @@ string BuildClosedTradesJson()
          EscapeJsonString(dealSymbol),
          origType,
          dealVol,
-         dealPrice,
+         openPrice,
          dealPrice,
          dealProfit,
-         dealTime,
+         openTime,
          dealTime,
          dealMagic
       );
@@ -636,31 +700,37 @@ void ManagePositionsProtection()
       int digits = (int)SymbolInfoInteger(posSymbol, SYMBOL_DIGITS);
       if(point <= 0.0) continue;
 
+      int pointsPerPip = GetPointsPerPip(posSymbol);
+      double bepTriggerPts = InpBEPTriggerPips * pointsPerPip;
+      double bepBufferPts = InpBEPBufferPips * pointsPerPip;
+      double trailingDistPts = InpTrailingDistPips * pointsPerPip;
+      double trailingStepPts = InpTrailingStepPips * pointsPerPip;
+
       if(posType == POSITION_TYPE_BUY)
       {
          double profitPoints = (currentPrice - openPrice) / point;
          
          // 1. Auto-Breakeven check
-         if(InpEnableBEP && profitPoints >= InpBEPTriggerPoints)
+         if(InpEnableBEP && profitPoints >= bepTriggerPts)
          {
-            double newSL = NormalizeDouble(openPrice + (InpBEPBufferPoints * point), digits);
+            double newSL = NormalizeDouble(openPrice + (bepBufferPts * point), digits);
             if(currentSL < newSL - (point * 0.5) || currentSL == 0.0)
             {
                ResetLastError();
                if(g_trade.PositionModify(ticket, newSL, currentTP))
                {
                   PrintFormat(">>> [BridgeEA] Auto-BEP BUY #%I64u: SL moved to %.5f (+%d pts)",
-                              ticket, newSL, InpBEPBufferPoints);
+                              ticket, newSL, (int)bepBufferPts);
                   currentSL = newSL;
                }
             }
          }
          
          // 2. Trailing Stop check
-         if(InpEnableTrailing && profitPoints >= InpTrailingDistance)
+         if(InpEnableTrailing && profitPoints >= trailingDistPts)
          {
-            double proposedSL = NormalizeDouble(currentPrice - (InpTrailingDistance * point), digits);
-            if(proposedSL > currentSL + (InpTrailingStep * point))
+            double proposedSL = NormalizeDouble(currentPrice - (trailingDistPts * point), digits);
+            if(proposedSL > currentSL + (trailingStepPts * point))
             {
                ResetLastError();
                if(g_trade.PositionModify(ticket, proposedSL, currentTP))
@@ -676,26 +746,26 @@ void ManagePositionsProtection()
          double profitPoints = (openPrice - currentPrice) / point;
          
          // 1. Auto-Breakeven check
-         if(InpEnableBEP && profitPoints >= InpBEPTriggerPoints)
+         if(InpEnableBEP && profitPoints >= bepTriggerPts)
          {
-            double newSL = NormalizeDouble(openPrice - (InpBEPBufferPoints * point), digits);
+            double newSL = NormalizeDouble(openPrice - (bepBufferPts * point), digits);
             if(currentSL > newSL + (point * 0.5) || currentSL == 0.0)
             {
                ResetLastError();
                if(g_trade.PositionModify(ticket, newSL, currentTP))
                {
                   PrintFormat(">>> [BridgeEA] Auto-BEP SELL #%I64u: SL moved to %.5f (+%d pts)",
-                              ticket, newSL, InpBEPBufferPoints);
+                              ticket, newSL, (int)bepBufferPts);
                   currentSL = newSL;
                }
             }
          }
          
          // 2. Trailing Stop check
-         if(InpEnableTrailing && profitPoints >= InpTrailingDistance)
+         if(InpEnableTrailing && profitPoints >= trailingDistPts)
          {
-            double proposedSL = NormalizeDouble(currentPrice + (InpTrailingDistance * point), digits);
-            if(currentSL == 0.0 || proposedSL < currentSL - (InpTrailingStep * point))
+            double proposedSL = NormalizeDouble(currentPrice + (trailingDistPts * point), digits);
+            if(currentSL == 0.0 || proposedSL < currentSL - (trailingStepPts * point))
             {
                ResetLastError();
                if(g_trade.PositionModify(ticket, proposedSL, currentTP))

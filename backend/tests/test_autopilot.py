@@ -202,3 +202,41 @@ def test_closed_position_detection_and_pnl_accumulation():
     assert data["total_daily_pnl"] == 150.0
     assert data["daily_drawdown_amount"] == 0.0
     assert data["daily_drawdown_percent"] == 0.0
+
+
+def test_autopilot_candles_single_execution_no_duplicate():
+    auth_headers = get_auth_headers("admin")
+    autopilot_service.set_starting_equity_baseline(10000.0)
+    client.post("/api/v1/autopilot/toggle", json={"enabled": True}, headers=auth_headers)
+
+    candles = []
+    price = 1.08000
+    for i in range(35):
+        step = 0.00010 if (i % 2 == 0) else -0.00008
+        price += step
+        candles.append({
+            "time": 1700000000 + (i * 60),
+            "open": round(price - 0.00005, 5),
+            "high": round(price + 0.0001, 5),
+            "low": round(price - 0.0001, 5),
+            "close": round(price, 5),
+            "volume": 100.0
+        })
+
+    # Post heartbeat with candles
+    hb_resp = client.post("/api/v1/bridge/heartbeat", json={
+        "account_number": 887766,
+        "server": "Demo",
+        "currency": "USD",
+        "balance": 10000.0,
+        "equity": 10000.0,
+        "candles": candles,
+        "chart_symbol": "EURUSD",
+        "timestamp": int(time.time())
+    })
+    assert hb_resp.status_code == 200
+    commands = hb_resp.json()["commands"]
+    # Critical invariant: Exactly ONE order must be queued, never duplicates!
+    assert len(commands) == 1
+    assert commands[0]["action"] == "BUY"
+    assert commands[0]["symbol"] == "EURUSD"

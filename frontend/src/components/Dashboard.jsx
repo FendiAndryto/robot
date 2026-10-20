@@ -200,7 +200,11 @@ export default function Dashboard({ user, onLogout }) {
 
         {/* Tab 2: Trading Journal */}
         <div className={`page-container ${activeTab === 'journal' ? 'active' : ''}`} id="tab-journal">
-          <JournalTab onNavigateAI={() => setActiveTab('ai')} />
+          <JournalTab
+            activeTab={activeTab}
+            closedTradesCount={bridgeStatus?.closed_trades_count}
+            onNavigateAI={() => setActiveTab('ai')}
+          />
         </div>
 
         {/* Tab 3: Market Overview */}

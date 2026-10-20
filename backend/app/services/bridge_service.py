@@ -171,10 +171,6 @@ class BridgeService:
 
             self._latest_payload = payload
             self._last_received_time = current_time
-            
-            # Pop pending commands to return to EA
-            commands_to_send = list(self._pending_commands)
-            self._pending_commands.clear()
 
         # Real-time strategy evaluation on real candles sent from MT5
         if (payload.candles and len(payload.candles) >= 20) or (payload.candles_m5 and len(payload.candles_m5) >= 20):
@@ -219,21 +215,15 @@ class BridgeService:
                         current_spread=current_spread
                     )
 
-                if generated_signal and autopilot_service.is_autopilot_active():
+                if generated_signal and autopilot_service.is_autopilot_active() and not autopilot_service.is_drawdown_locked():
                     trade_vol = (
                         settings.AUTOPILOT_FIXED_LOT_SIZE
                         if settings.AUTOPILOT_USE_FIXED_LOT
                         else generated_signal.recommended_lot
                     )
-                    auto_order = OrderRequest(
-                        action=generated_signal.action,
-                        symbol=generated_signal.symbol,
-                        volume=trade_vol,
-                        sl=generated_signal.sl,
-                        tp=generated_signal.tp
-                    )
-                    self.submit_order(auto_order)
+                    strategy_engine.approve_signal(generated_signal.signal_id, custom_lot=trade_vol)
                     autopilot_service.increment_auto_executed_count()
+                    generated_signal.reason += " [AUTOPILOT AUTO-EXECUTED]"
             except Exception:
                 pass
 
@@ -254,6 +244,11 @@ class BridgeService:
                     )
             except Exception:
                 pass
+
+        # Pop pending commands to return to EA
+        with self._lock:
+            commands_to_send = list(self._pending_commands)
+            self._pending_commands.clear()
 
         return HeartbeatResponse(
             status="ok",
