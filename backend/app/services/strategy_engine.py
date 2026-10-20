@@ -206,6 +206,12 @@ class StrategyEngine:
             live_equity=live_equity
         )
 
+        final_lot = (
+            settings.AUTOPILOT_FIXED_LOT_SIZE
+            if settings.AUTOPILOT_USE_FIXED_LOT
+            else lot_calc.calculated_lot
+        )
+
         signal_id = f"sig_{current_time}_{sym.lower()}_{action.lower()}_{uuid.uuid4().hex[:4]}"
         signal = SignalItem(
             signal_id=signal_id,
@@ -218,7 +224,7 @@ class StrategyEngine:
             sl_pips=sl_pips,
             tp_pips=tp_pips,
             risk_reward=f"1:{settings.STRATEGY_DEFAULT_RR_RATIO:.1f}",
-            recommended_lot=lot_calc.calculated_lot,
+            recommended_lot=final_lot,
             risk_amount=lot_calc.risk_amount,
             reason=reason,
             indicators=IndicatorValues(

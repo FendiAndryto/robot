@@ -201,19 +201,34 @@ class BridgeService:
                 cur_quote = self._market_quotes.get(sym_eval.upper())
                 current_spread = cur_quote.spread if cur_quote else None
 
-                generated_signal = strategy_engine.evaluate_candles(
-                    symbol=sym_eval,
-                    candles=parsed_candles_m15,
-                    candles_m5=parsed_candles_m5 if parsed_candles_m5 else None,
-                    live_equity=payload.equity,
-                    current_spread=current_spread
+                # Protection: Block multiple layers if symbol already has active open position
+                sym_base = sym_eval.upper().replace("M", "")
+                existing_pos_count = sum(
+                    1 for p in payload.positions
+                    if p.symbol.upper().replace("M", "") == sym_base
                 )
 
+                if existing_pos_count >= settings.STRATEGY_MAX_CONCURRENT_POSITIONS_PER_SYMBOL:
+                    generated_signal = None
+                else:
+                    generated_signal = strategy_engine.evaluate_candles(
+                        symbol=sym_eval,
+                        candles=parsed_candles_m15,
+                        candles_m5=parsed_candles_m5 if parsed_candles_m5 else None,
+                        live_equity=payload.equity,
+                        current_spread=current_spread
+                    )
+
                 if generated_signal and autopilot_service.is_autopilot_active():
+                    trade_vol = (
+                        settings.AUTOPILOT_FIXED_LOT_SIZE
+                        if settings.AUTOPILOT_USE_FIXED_LOT
+                        else generated_signal.recommended_lot
+                    )
                     auto_order = OrderRequest(
                         action=generated_signal.action,
                         symbol=generated_signal.symbol,
-                        volume=generated_signal.recommended_lot,
+                        volume=trade_vol,
                         sl=generated_signal.sl,
                         tp=generated_signal.tp
                     )

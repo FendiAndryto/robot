@@ -43,11 +43,14 @@ class Settings(BaseSettings):
     STRATEGY_ENABLE_SESSION_FILTER: bool = True
     STRATEGY_SESSION_START_HOUR_UTC: int = 6   # 13:00 WIB (London Open)
     STRATEGY_SESSION_END_HOUR_UTC: int = 21    # 04:00 WIB (Before Rollover Blackout)
+    STRATEGY_MAX_CONCURRENT_POSITIONS_PER_SYMBOL: int = 1
 
     # Auto-Pilot Mode & Drawdown Guard
     AUTOPILOT_DEFAULT_ENABLED: bool = False
     AUTOPILOT_MAX_DAILY_TRADES: int = 20
     AUTOPILOT_RESET_HOUR_UTC: int = 0
+    AUTOPILOT_USE_FIXED_LOT: bool = True
+    AUTOPILOT_FIXED_LOT_SIZE: float = 0.01
 
     # Telegram Push Notifications
     TELEGRAM_BOT_TOKEN: str = ""
