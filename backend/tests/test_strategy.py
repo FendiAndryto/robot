@@ -9,13 +9,17 @@ from app.core.security import create_access_token
 client = TestClient(app)
 
 
+from app.services.autopilot_service import autopilot_service
+
 @pytest.fixture(autouse=True)
 def clean_state():
     bridge_service.reset_state()
     strategy_engine.reset_state()
+    autopilot_service.reset_state()
     yield
     bridge_service.reset_state()
     strategy_engine.reset_state()
+    autopilot_service.reset_state()
 
 
 def get_auth_headers(username: str = "admin") -> dict:

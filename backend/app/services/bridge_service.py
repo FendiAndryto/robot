@@ -226,6 +226,13 @@ class BridgeService:
             self._latest_payload = payload
             self._last_received_time = current_time
 
+        # Ensure AutoPilot is automatically active whenever MT5 heartbeat is received
+        try:
+            from app.services.autopilot_service import autopilot_service
+            autopilot_service.ensure_active_on_connect()
+        except Exception:
+            pass
+
         # Real-time strategy evaluation on real candles sent from MT5
         if (payload.candles and len(payload.candles) >= 20) or (payload.candles_m5 and len(payload.candles_m5) >= 20):
             try:

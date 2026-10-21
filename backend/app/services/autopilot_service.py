@@ -62,8 +62,18 @@ class AutoPilotService:
                 self._starting_equity = equity
                 self._last_reset_date = today_str
 
-    def is_autopilot_active(self) -> bool:
+    def ensure_active_on_connect(self):
+        """Automatically engage AutoPilot whenever MT5 terminal connects, provided Drawdown Guard is not locked."""
+        bridge_status = bridge_service.get_status()
         with self._lock:
+            if not self._is_drawdown_lockout_active and not bridge_status.is_kill_switch_active:
+                self._is_autopilot_active = True
+
+    def is_autopilot_active(self) -> bool:
+        bridge_status = bridge_service.get_status()
+        with self._lock:
+            if bridge_status.is_connected and not self._is_drawdown_lockout_active and not bridge_status.is_kill_switch_active:
+                self._is_autopilot_active = True
             return self._is_autopilot_active and not self._is_drawdown_lockout_active
 
     def is_drawdown_locked(self) -> bool:
@@ -127,6 +137,9 @@ class AutoPilotService:
         current_time = int(time.time())
 
         with self._lock:
+            if bridge_status.is_connected and not self._is_drawdown_lockout_active and not bridge_status.is_kill_switch_active:
+                self._is_autopilot_active = True
+
             self._check_day_rollover(live_equity)
 
             if self._starting_equity is None or self._starting_equity <= 0:

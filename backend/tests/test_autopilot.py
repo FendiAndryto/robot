@@ -241,3 +241,21 @@ def test_autopilot_candles_single_execution_no_duplicate():
     assert len(commands) == 1
     assert commands[0]["action"] == "BUY"
     assert commands[0]["symbol"] == "EURUSD"
+
+
+def test_autopilot_auto_active_on_mt5_connect():
+    # Verify that when MT5 connects (sends heartbeat), AutoPilot engages automatically
+    # without needing the user to toggle it manually
+    hb = client.post("/api/v1/bridge/heartbeat", json={
+        "account_number": 887766,
+        "server": "Demo",
+        "currency": "USD",
+        "balance": 10000.0,
+        "equity": 10000.0,
+        "timestamp": int(time.time())
+    })
+    assert hb.status_code == 200
+
+    status = client.get("/api/v1/autopilot/status")
+    assert status.status_code == 200
+    assert status.json()["is_autopilot_active"] is True
