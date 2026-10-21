@@ -7,9 +7,6 @@ import MarketTab from './MarketTab';
 import ComingSoonTab from './ComingSoonTab';
 import ProfileTab from './ProfileTab';
 import FloatingSignalWidget from './FloatingSignalWidget';
-import OrderDrawer from './OrderDrawer';
-import KillSwitchModal from './KillSwitchModal';
-import RiskBanner from './RiskBanner';
 import DrawdownBanner from './DrawdownBanner';
 import Mt5ConnectModal from './Mt5ConnectModal';
 import { api } from '../services/api';
@@ -21,13 +18,9 @@ export default function Dashboard({ user, onLogout }) {
   const [signals, setSignals] = useState([]);
   const [autopilotStatus, setAutopilotStatus] = useState(null);
 
-  // Modals & Drawers state
-  const [tradeSymbol, setTradeSymbol] = useState('EURUSD');
-  const [isOrderDrawerOpen, setIsOrderDrawerOpen] = useState(false);
-  const [isKillSwitchModalOpen, setIsKillSwitchModalOpen] = useState(false);
+  // Modals state
   const [isMt5ModalOpen, setIsMt5ModalOpen] = useState(false);
   const [isResettingDrawdown, setIsResettingDrawdown] = useState(false);
-  const [isUnlockingEngine, setIsUnlockingEngine] = useState(false);
   const [isTestingTelegram, setIsTestingTelegram] = useState(false);
   const [telegramStatusMsg, setTelegramStatusMsg] = useState(null);
   const timerRef = useRef(null);
@@ -84,23 +77,6 @@ export default function Dashboard({ user, onLogout }) {
     };
   }, [pollInterval]);
 
-  const handleTriggerKillSwitch = async (reason) => {
-    await api.triggerKillSwitch(reason);
-    await fetchStatus();
-    await fetchAutoPilotStatus();
-  };
-
-  const handleUnlockEngine = async () => {
-    setIsUnlockingEngine(true);
-    try {
-      await api.disarmKillSwitch();
-      await fetchStatus();
-      await fetchAutoPilotStatus();
-    } finally {
-      setIsUnlockingEngine(false);
-    }
-  };
-
   const handleToggleAutoPilot = async (enabled) => {
     try {
       await api.toggleAutoPilot(enabled);
@@ -142,14 +118,7 @@ export default function Dashboard({ user, onLogout }) {
 
   const metrics = bridgeStatus?.metrics || {};
   const isConnected = bridgeStatus?.is_connected || false;
-  const isKillSwitchActive = bridgeStatus?.is_kill_switch_active || false;
-  const killSwitchReason = bridgeStatus?.kill_switch_reason;
-  const killSwitchTime = bridgeStatus?.kill_switch_time;
   const secondsSinceHeartbeat = bridgeStatus?.seconds_since_last_heartbeat ?? null;
-  const equity = metrics.equity ?? 10000;
-  const currency = metrics.currency || 'USD';
-  const openPositions = metrics.open_positions ?? 0;
-  const floatingPnl = metrics.floating_pnl ?? 0;
 
   return (
     <div className="app-shell" id="tradegear-dashboard">
@@ -160,21 +129,10 @@ export default function Dashboard({ user, onLogout }) {
         isConnected={isConnected}
         latency={secondsSinceHeartbeat}
         onOpenMt5Modal={() => setIsMt5ModalOpen(true)}
-        onOpenNewTrade={() => setIsOrderDrawerOpen(true)}
       />
 
       {/* Main Container */}
       <main className="app-main">
-        {/* Global Emergency Kill Switch Warning Banner */}
-        {isKillSwitchActive && (
-          <RiskBanner
-            reason={killSwitchReason}
-            triggeredAt={killSwitchTime}
-            onUnlock={handleUnlockEngine}
-            isUnlocking={isUnlockingEngine}
-          />
-        )}
-
         {/* Global Daily Drawdown Lockout Warning Banner */}
         {autopilotStatus?.is_drawdown_lockout_active && (
           <DrawdownBanner
@@ -190,7 +148,6 @@ export default function Dashboard({ user, onLogout }) {
           <HomeTab
             bridgeStatus={bridgeStatus}
             autopilotStatus={autopilotStatus}
-            onOpenNewTrade={() => setIsOrderDrawerOpen(true)}
             onNavigateJournal={() => setActiveTab('journal')}
             onNavigateAI={() => setActiveTab('ai')}
             onNavigateMarket={() => setActiveTab('market')}
@@ -208,16 +165,9 @@ export default function Dashboard({ user, onLogout }) {
           />
         </div>
 
-
         {/* Tab 3: Market Overview */}
         <div className={`page-container ${activeTab === 'market' ? 'active' : ''}`} id="tab-market">
-          <MarketTab
-            bridgeStatus={bridgeStatus}
-            onOpenOrder={(sym) => {
-              if (sym) setTradeSymbol(sym);
-              setIsOrderDrawerOpen(true);
-            }}
-          />
+          <MarketTab bridgeStatus={bridgeStatus} />
         </div>
 
         {/* Tab 4: AI Assistant (Coming Soon) */}
@@ -240,9 +190,6 @@ export default function Dashboard({ user, onLogout }) {
             pollInterval={pollInterval}
             onPollIntervalChange={setPollInterval}
             onOpenMt5Modal={() => setIsMt5ModalOpen(true)}
-            onTriggerKillSwitch={() => setIsKillSwitchModalOpen(true)}
-            onUnlockEngine={handleUnlockEngine}
-            isUnlockingEngine={isUnlockingEngine}
             onResetDrawdown={handleResetDrawdown}
             isResettingDrawdown={isResettingDrawdown}
             onTestTelegram={handleTestTelegram}
@@ -255,43 +202,12 @@ export default function Dashboard({ user, onLogout }) {
       {/* Mobile Fixed Bottom Navigation Bar */}
       <TradeGearBottomNav activeTab={activeTab} onSelectTab={setActiveTab} />
 
-      {/* Floating Strategy Recommendation Signals Widget */}
+      {/* Floating Strategy Recommendation Signals Widget (Read-Only Live Telemetry) */}
       <FloatingSignalWidget
         signals={signals}
         onRefreshSignals={fetchSignals}
-        isKillSwitchActive={isKillSwitchActive}
         isAutoPilotActive={autopilotStatus?.is_autopilot_active ?? false}
         onToggleAutoPilot={handleToggleAutoPilot}
-        onOrderExecuted={() => {
-          fetchStatus();
-          fetchSignals();
-          fetchAutoPilotStatus();
-        }}
-      />
-
-      {/* Slide-over Manual Order Execution Drawer */}
-      <OrderDrawer
-        isOpen={isOrderDrawerOpen}
-        onClose={() => setIsOrderDrawerOpen(false)}
-        equity={equity}
-        currency={currency}
-        isKillSwitchActive={isKillSwitchActive}
-        marketQuotes={bridgeStatus?.market_quotes || []}
-        initialSymbol={tradeSymbol}
-        onOrderSubmitted={() => {
-          fetchStatus();
-          fetchSignals();
-        }}
-      />
-
-      {/* Emergency Kill Switch Confirmation Modal */}
-      <KillSwitchModal
-        isOpen={isKillSwitchModalOpen}
-        onClose={() => setIsKillSwitchModalOpen(false)}
-        onConfirm={handleTriggerKillSwitch}
-        openPositionsCount={openPositions}
-        floatingPnl={floatingPnl}
-        currency={currency}
       />
 
       {/* MT5 Web-GUI Connect & Broker Screen Modal */}

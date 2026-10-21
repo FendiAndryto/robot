@@ -199,21 +199,6 @@ export const api = {
   },
 
 
-  // Trade Execution
-  async submitOrder(orderData) {
-    const res = await authFetch(`${API_BASE}/api/v1/bridge/order`, {
-      method: 'POST',
-      body: JSON.stringify(orderData)
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Order failed' }));
-      throw new Error(err.detail || 'Order execution failed');
-    }
-
-    return res.json();
-  },
-
   async getPositions() {
     const res = await authFetch(`${API_BASE}/api/v1/bridge/positions`, {
       method: 'GET'
@@ -226,20 +211,7 @@ export const api = {
     return res.json();
   },
 
-  async closePosition(ticket) {
-    return this.submitOrder({
-      action: 'CLOSE',
-      ticket: Number(ticket)
-    });
-  },
-
-  async closeAllPositions() {
-    return this.submitOrder({
-      action: 'CLOSE_ALL'
-    });
-  },
-
-  // Risk Management & Emergency Kill Switch
+  // Risk Management & Telemetry
   async getRiskStatus() {
     const res = await authFetch(`${API_BASE}/api/v1/risk/status`, {
       method: 'GET'
@@ -262,30 +234,7 @@ export const api = {
     return res.json();
   },
 
-  async triggerKillSwitch(reason = 'Manual emergency kill switch triggered') {
-    const res = await authFetch(`${API_BASE}/api/v1/risk/kill-switch`, {
-      method: 'POST',
-      body: JSON.stringify({ reason })
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Failed to engage Kill Switch' }));
-      throw new Error(err.detail || 'Emergency Kill Switch activation failed');
-    }
-    return res.json();
-  },
-
-  async disarmKillSwitch() {
-    const res = await authFetch(`${API_BASE}/api/v1/risk/unlock`, {
-      method: 'POST'
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Failed to disarm Kill Switch' }));
-      throw new Error(err.detail || 'Failed to unlock trading engine');
-    }
-    return res.json();
-  },
-
-  // Strategy Engine & Semi-Auto Signal Approval
+  // Strategy Engine & Signal Telemetry
   async getSignals(includeAll = false) {
     const query = includeAll ? '?all=true' : '';
     const res = await authFetch(`${API_BASE}/api/v1/strategy/signals${query}`, {
@@ -293,30 +242,6 @@ export const api = {
     });
     if (!res.ok) {
       throw new Error('Failed to fetch trading signals');
-    }
-    return res.json();
-  },
-
-  async approveSignal(signalId, customLot = null) {
-    const res = await authFetch(`${API_BASE}/api/v1/strategy/signals/${signalId}/approve`, {
-      method: 'POST',
-      body: JSON.stringify(customLot ? { custom_lot: customLot } : {})
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Failed to approve signal' }));
-      throw new Error(err.detail || 'Signal approval failed');
-    }
-    return res.json();
-  },
-
-  async dismissSignal(signalId, reason = 'Manual dismissal by user') {
-    const res = await authFetch(`${API_BASE}/api/v1/strategy/signals/${signalId}/dismiss`, {
-      method: 'POST',
-      body: JSON.stringify({ reason })
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Failed to dismiss signal' }));
-      throw new Error(err.detail || 'Signal dismissal failed');
     }
     return res.json();
   },

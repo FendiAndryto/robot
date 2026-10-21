@@ -23,7 +23,7 @@ const getSymbolName = (sym) => {
   return sym;
 };
 
-export default function MarketTab({ bridgeStatus, onOpenOrder }) {
+export default function MarketTab({ bridgeStatus }) {
   const [quotes, setQuotes] = useState([]);
   const [selectedSymbol, setSelectedSymbol] = useState('XAUUSD');
   const [activeTf, setActiveTf] = useState('M15');

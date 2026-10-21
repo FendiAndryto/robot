@@ -95,14 +95,10 @@ def test_drawdown_calculation_and_guard_breach():
     assert data["daily_drawdown_percent"] == 3.50
     assert data["daily_drawdown_amount"] == 350.0
 
-    # 4. Attempting to place new order must be blocked by Drawdown Guard (403 Forbidden)
-    order_resp = client.post("/api/v1/bridge/order", json={
-        "action": "BUY",
-        "symbol": "EURUSD",
-        "volume": 0.1
-    }, headers=auth_headers)
-    assert order_resp.status_code == 403
-    assert "Daily Drawdown Guard" in order_resp.json()["detail"]
+    # 4. Attempting to re-engage AutoPilot must be blocked by Drawdown Guard (403 Forbidden)
+    toggle_resp = client.post("/api/v1/autopilot/toggle", json={"enabled": True}, headers=auth_headers)
+    assert toggle_resp.status_code == 403
+    assert "Daily Drawdown Guard" in toggle_resp.json()["detail"]
 
     # 5. Reset Drawdown Guard
     reset_resp = client.post("/api/v1/autopilot/reset-drawdown", json={"starting_equity": 9650.0}, headers=auth_headers)

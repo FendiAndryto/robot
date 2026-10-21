@@ -95,15 +95,15 @@ async def get_equity_curve(range: str = "1M"):
 
 @router.post(
     "/order",
-    response_model=OrderResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Queue a manual trading order for MT5 execution"
+    status_code=status.HTTP_403_FORBIDDEN,
+    summary="Manual order execution disabled (Full-Auto trading only)"
 )
-async def submit_order(
-    order_req: OrderRequest,
-    current_user: str = Depends(get_current_user)
-):
-    return bridge_service.submit_order(order_req)
+async def submit_order():
+    from fastapi import HTTPException
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Manual order placement from web application is disabled. Trading is strictly full-auto only via autonomous AutoPilot."
+    )
 
 
 @router.get(

@@ -5,7 +5,6 @@ import {
   TrendingUp,
   TrendingDown,
   Layers,
-  Plus,
   RefreshCw,
   XCircle,
   Edit2
@@ -25,18 +24,16 @@ const formatCurrency = (val, currency = 'USD') => {
 export default function HomeTab({
   bridgeStatus,
   autopilotStatus,
-  onOpenNewTrade,
   onNavigateJournal,
   onNavigateAI,
   onNavigateMarket,
   onRefresh
 }) {
   const [chartRange, setChartRange] = useState('Month');
-  const [closingTicket, setClosingTicket] = useState(null);
   const [equityCurveData, setEquityCurveData] = useState(null);
   const [historyData, setHistoryData] = useState(null);
 
-  // Initial Deposit Quick-Edit Modal States
+  // Initial Balance Benchmark Quick-Edit Modal States
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
   const [depositInput, setDepositInput] = useState('');
   const [isSavingDeposit, setIsSavingDeposit] = useState(false);
@@ -53,7 +50,7 @@ export default function HomeTab({
   const floatingPnl = positions.length > 0 ? calculatedFloatingPnl : (metrics.floating_pnl ?? 0);
   const marketQuotes = bridgeStatus?.market_quotes || [];
 
-  // Initial Deposit & All-Time Performance Calculations
+  // Initial Balance Benchmark & All-Time Performance Calculations
   const initialDeposit = bridgeStatus?.initial_deposit ?? metrics.initial_deposit ?? balance;
   const isDepositOverridden = bridgeStatus?.is_deposit_overridden ?? false;
   const settledPnl = bridgeStatus?.settled_pnl !== undefined && bridgeStatus?.settled_pnl !== null
@@ -90,23 +87,10 @@ export default function HomeTab({
     };
   }, [bridgeStatus, chartRange]);
 
-  const handleClosePosition = async (ticket) => {
-    if (!window.confirm(`Konfirmasi tutup posisi ticket #${ticket}?`)) return;
-    setClosingTicket(ticket);
-    try {
-      await api.closePosition(ticket);
-      if (onRefresh) onRefresh();
-    } catch (err) {
-      alert(`Gagal menutup posisi: ${err.message || 'Error'}`);
-    } finally {
-      setClosingTicket(null);
-    }
-  };
-
   const handleSaveInitialDeposit = async () => {
     const num = parseFloat(depositInput);
     if (isNaN(num) || num <= 0) {
-      setDepositSaveMsg({ type: 'error', text: 'Masukkan nominal deposit awal yang valid (> 0).' });
+      setDepositSaveMsg({ type: 'error', text: 'Masukkan nominal saldo awal yang valid (> 0).' });
       return;
     }
     setIsSavingDeposit(true);
@@ -114,13 +98,13 @@ export default function HomeTab({
     try {
       await api.setInitialDeposit(num);
       if (onRefresh) onRefresh();
-      setDepositSaveMsg({ type: 'success', text: 'Deposit saldo awal berhasil diperbarui!' });
+      setDepositSaveMsg({ type: 'success', text: 'Benchmark saldo awal berhasil diperbarui!' });
       setTimeout(() => {
         setIsDepositModalOpen(false);
         setDepositSaveMsg(null);
       }, 700);
     } catch (err) {
-      setDepositSaveMsg({ type: 'error', text: err.message || 'Gagal menyimpan deposit awal.' });
+      setDepositSaveMsg({ type: 'error', text: err.message || 'Gagal menyimpan benchmark saldo awal.' });
     } finally {
       setIsSavingDeposit(false);
     }
@@ -138,7 +122,7 @@ export default function HomeTab({
         setDepositSaveMsg(null);
       }, 700);
     } catch (err) {
-      setDepositSaveMsg({ type: 'error', text: err.message || 'Gagal mereset deposit awal.' });
+      setDepositSaveMsg({ type: 'error', text: err.message || 'Gagal mereset saldo awal.' });
     } finally {
       setIsSavingDeposit(false);
     }
@@ -196,17 +180,6 @@ export default function HomeTab({
           dengan proteksi risiko drawdown otomatis.
         </p>
         <div className="btns" style={{ marginTop: '14px' }}>
-          {onOpenNewTrade && (
-            <button
-              type="button"
-              className="btn"
-              onClick={onOpenNewTrade}
-              id="home-banner-new-trade-btn"
-            >
-              <Plus size={14} />
-              <span>Buka Order Baru</span>
-            </button>
-          )}
           {onNavigateJournal && (
             <button
               type="button"
@@ -244,7 +217,7 @@ export default function HomeTab({
                   setDepositSaveMsg(null);
                   setIsDepositModalOpen(true);
                 }}
-                title="Sesuaikan Modal Awal (Deposit)"
+                title="Sesuaikan Benchmark Saldo Awal Akun"
                 style={{
                   background: 'rgba(69, 224, 173, 0.1)',
                   border: '1px solid rgba(69, 224, 173, 0.25)',
@@ -261,7 +234,7 @@ export default function HomeTab({
                 id="edit-initial-deposit-btn"
               >
                 <Edit2 size={10} />
-                <span>Deposit</span>
+                <span>Saldo Awal</span>
               </button>
               <span className="icon-box">
                 <DollarSign size={16} />
@@ -271,7 +244,7 @@ export default function HomeTab({
           <div className="metric">{formatCurrency(balance, currency)}</div>
           <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '6px' }}>
             <div style={{ color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
-              <span>Deposit Awal:</span>
+              <span>Saldo Awal (Benchmark):</span>
               <span style={{ fontWeight: 600, color: '#e6f1f2' }}>
                 {formatCurrency(initialDeposit, currency)}
                 <small style={{ marginLeft: '4px', fontSize: '9px', color: isDepositOverridden ? 'var(--amber)' : 'var(--muted)' }}>
@@ -299,7 +272,7 @@ export default function HomeTab({
           <div className="metric">{formatCurrency(equity, currency)}</div>
           <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '6px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
-              <span style={{ color: 'var(--muted)' }}>Riil vs Deposit:</span>
+              <span style={{ color: 'var(--muted)' }}>Riil vs Saldo Awal:</span>
               <span style={{ color: allTimePnl >= 0 ? 'var(--g)' : 'var(--red)' }}>
                 {allTimePnl >= 0 ? '+' : ''}{formatCurrency(allTimePnl, currency)} ({allTimePnlPercent >= 0 ? '+' : ''}{allTimePnlPercent.toFixed(1)}%)
               </span>
@@ -450,18 +423,9 @@ export default function HomeTab({
                 <div className="tiny">{positions.length} running on MT5</div>
               </div>
             </div>
-            {onOpenNewTrade && (
-              <button
-                type="button"
-                className="btn alt"
-                style={{ fontSize: '10px', padding: '4px 9px' }}
-                onClick={onOpenNewTrade}
-                id="home-active-trades-quick-new-btn"
-              >
-                <Plus size={11} />
-                <span>+ Trade</span>
-              </button>
-            )}
+            <span className="tag" style={{ fontSize: '9px', background: 'rgba(69, 224, 173, 0.1)', color: 'var(--g)' }}>
+              FULL-AUTO TELEMETRY
+            </span>
           </div>
 
           <div style={{ flex: 1, maxHeight: '215px', overflowY: 'auto', paddingRight: '4px' }}>
@@ -496,17 +460,6 @@ export default function HomeTab({
                         </div>
                         <small style={{ fontSize: '9px', color: 'var(--muted)' }}>Floating</small>
                       </div>
-                      <button
-                        type="button"
-                        className="btn alt"
-                        style={{ padding: '5px 7px', fontSize: '10px', color: 'var(--red)', border: '1px solid rgba(255,91,107,0.3)' }}
-                        onClick={() => handleClosePosition(pos.ticket)}
-                        disabled={closingTicket === pos.ticket}
-                        title="Tutup posisi segera di MT5"
-                        id={`close-pos-${pos.ticket}-btn`}
-                      >
-                        <XCircle size={13} />
-                      </button>
                     </div>
                   </div>
                 );
@@ -514,17 +467,7 @@ export default function HomeTab({
             ) : (
               <div style={{ padding: '36px 12px', textAlign: 'center', color: 'var(--muted)' }}>
                 <div style={{ fontSize: '12px', marginBottom: '8px' }}>Tidak ada posisi aktif yang sedang berjalan di terminal MT5.</div>
-                {onOpenNewTrade && (
-                  <button
-                    type="button"
-                    className="btn alt"
-                    style={{ fontSize: '11px', margin: '0 auto' }}
-                    onClick={onOpenNewTrade}
-                  >
-                    <Plus size={12} />
-                    <span>Buka Posisi Baru</span>
-                  </button>
-                )}
+                <div style={{ fontSize: '11px', color: 'var(--muted)' }}>Posisi akan dibuka otomatis oleh AutoPilot saat sinyal konfluensi terkonfirmasi.</div>
               </div>
             )}
           </div>
@@ -654,7 +597,7 @@ export default function HomeTab({
             <div className="cardhead" style={{ borderBottom: '1px solid var(--line)', paddingBottom: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <DollarSign size={18} style={{ color: 'var(--g)' }} />
-                <h3 style={{ margin: 0, fontSize: '14px' }}>Pengaturan Deposit Saldo Awal</h3>
+                <h3 style={{ margin: 0, fontSize: '14px' }}>Kalibrasi Benchmark Saldo Awal</h3>
               </div>
               <button
                 type="button"
@@ -667,8 +610,24 @@ export default function HomeTab({
             </div>
 
             <div style={{ padding: '16px 0', fontSize: '12px', color: '#c9d8dc', lineHeight: 1.5 }}>
+              {/* Regulatory Notice Banner */}
+              <div
+                style={{
+                  background: 'rgba(38, 166, 154, 0.08)',
+                  border: '1px solid rgba(38, 166, 154, 0.25)',
+                  borderRadius: '8px',
+                  padding: '9px 12px',
+                  fontSize: '11px',
+                  color: '#a0c4cf',
+                  marginBottom: '12px',
+                  lineHeight: 1.45
+                }}
+              >
+                <strong style={{ color: 'var(--g)' }}>Analitik Telemetry:</strong> Nilai ini murni sebagai parameter baseline analitik untuk menghitung performa P/L & persentase pertumbuhan akun. Aplikasi ini tidak melayani transaksi setor/tarik dana (deposit/withdrawal). Seluruh transaksi keuangan dilakukan langsung dengan broker Anda di terminal MT5.
+              </div>
+
               <p style={{ margin: '0 0 12px' }}>
-                Sistem secara otomatis mendeteksi transaksi deposit pertama dari terminal MT5. Kamu dapat menyesuaikan nominal ini secara manual sebagai baseline perhitungan keuntungan bersih (All-Time P/L & ROI).
+                Sistem mendeteksi transaksi balance pertama dari deal history MT5. Anda dapat menyesuaikan nominal ini sebagai benchmark kalkulasi All-Time P/L dan kurva pertumbuhan.
               </p>
 
               <div style={{ background: '#091014', border: '1px solid var(--line)', borderRadius: '8px', padding: '10px 12px', marginBottom: '14px' }}>
@@ -679,7 +638,7 @@ export default function HomeTab({
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                  <span>Deposit Efektif:</span>
+                  <span>Saldo Awal Efektif:</span>
                   <span style={{ fontWeight: 700, color: '#fff' }}>
                     {formatCurrency(initialDeposit, currency)}
                   </span>
@@ -687,7 +646,7 @@ export default function HomeTab({
               </div>
 
               <label style={{ display: 'block', marginBottom: '6px', fontSize: '11px', fontWeight: 600, color: 'var(--muted)' }}>
-                NOMINAL DEPOSIT SALDO AWAL ({currency})
+                NOMINAL SALDO AWAL BENCHMARK ({currency})
               </label>
               <input
                 type="number"

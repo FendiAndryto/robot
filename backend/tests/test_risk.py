@@ -171,29 +171,23 @@ def test_kill_switch_lifecycle():
     assert len(commands) == 1
     assert commands[0]["action"] == "CLOSE_ALL"
 
-    # 5. Placing BUY or SELL must return 403 Forbidden while Kill Switch is active
+    # 5. Internal service BUY or SELL must raise HTTPException 403 while Kill Switch is active
+    from app.models.bridge import OrderRequest
+    from fastapi import HTTPException
+    import pytest
+    with pytest.raises(HTTPException) as exc_info:
+        bridge_service.submit_order(OrderRequest(action="BUY", symbol="EURUSD", volume=0.1))
+    assert exc_info.value.status_code == 403
+    assert "locked by emergency Kill Switch" in exc_info.value.detail
+
+    # 6. Web API always returns 403 (manual order execution disabled)
     buy_resp = client.post("/api/v1/bridge/order", json={
         "action": "BUY",
         "symbol": "EURUSD",
         "volume": 0.1
     }, headers=auth_headers)
     assert buy_resp.status_code == 403
-    assert "locked by emergency Kill Switch" in buy_resp.json()["detail"]
-
-    sell_resp = client.post("/api/v1/bridge/order", json={
-        "action": "SELL",
-        "symbol": "EURUSD",
-        "volume": 0.1
-    }, headers=auth_headers)
-    assert sell_resp.status_code == 403
-
-    # 6. Manual CLOSE must still be permitted
-    close_resp = client.post("/api/v1/bridge/order", json={
-        "action": "CLOSE",
-        "ticket": 9999
-    }, headers=auth_headers)
-    assert close_resp.status_code == 200
-    assert close_resp.json()["command"]["action"] == "CLOSE"
+    assert "Manual order placement from web application is disabled" in buy_resp.json()["detail"]
 
     # 7. Disarm / unlock the kill switch
     unlock_resp = client.post("/api/v1/risk/unlock", headers=auth_headers)
@@ -201,14 +195,9 @@ def test_kill_switch_lifecycle():
     assert unlock_resp.json()["status"] == "disarmed"
     assert unlock_resp.json()["is_kill_switch_active"] is False
 
-    # 8. Placing BUY is now permitted again
-    buy_again_resp = client.post("/api/v1/bridge/order", json={
-        "action": "BUY",
-        "symbol": "EURUSD",
-        "volume": 0.1
-    }, headers=auth_headers)
-    assert buy_again_resp.status_code == 200
-    assert buy_again_resp.json()["status"] == "queued"
+    # 8. Internal service BUY is now permitted again
+    buy_again_resp = bridge_service.submit_order(OrderRequest(action="BUY", symbol="EURUSD", volume=0.1))
+    assert buy_again_resp.status == "queued"
 
 
 def test_kill_switch_unauthorized():

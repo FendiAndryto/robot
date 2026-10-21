@@ -3,83 +3,31 @@ import {
   Zap,
   ChevronDown,
   ChevronUp,
-  CheckCircle2,
-  XCircle,
-  Sparkles
+  Activity,
+  Radio
 } from 'lucide-react';
-import { api } from '../services/api';
 
 export default function FloatingSignalWidget({
   signals = [],
   onRefreshSignals,
-  isKillSwitchActive = false,
   isAutoPilotActive = false,
-  onToggleAutoPilot,
-  onOrderExecuted
+  onToggleAutoPilot
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [approvingId, setApprovingId] = useState(null);
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [feedback, setFeedback] = useState(null);
-
   const signalCount = signals.length;
-
-  const handleApprove = async (signalId) => {
-    if (!signalId) return;
-    setApprovingId(signalId);
-    setFeedback(null);
-    try {
-      const res = await api.approveSignal(signalId);
-      setFeedback({ type: 'success', text: res.message || 'Signal approved & executed to MT5!' });
-      if (onOrderExecuted) onOrderExecuted();
-      if (onRefreshSignals) onRefreshSignals();
-    } catch (err) {
-      setFeedback({ type: 'error', text: err.message || 'Failed to approve signal' });
-    } finally {
-      setApprovingId(null);
-    }
-  };
-
-  const handleDismiss = async (signalId) => {
-    if (!signalId) return;
-    setFeedback(null);
-    try {
-      await api.dismissSignal(signalId);
-      setFeedback({ type: 'success', text: 'Signal dismissed' });
-      if (onRefreshSignals) onRefreshSignals();
-    } catch (err) {
-      console.error('Failed to dismiss signal:', err);
-      setFeedback({ type: 'error', text: err.message || 'Failed to dismiss signal' });
-    }
-  };
-
-  const handleSimulate = async () => {
-    setIsSimulating(true);
-    setFeedback(null);
-    try {
-      await api.generateTestSignal({ symbol: 'XAUUSD', action: 'BUY' });
-      if (onRefreshSignals) onRefreshSignals();
-      setIsOpen(true);
-      setFeedback({ type: 'success', text: 'Simulated BUY signal for XAUUSD generated!' });
-    } catch (err) {
-      setFeedback({ type: 'error', text: err.message || 'Failed to generate test signal' });
-    } finally {
-      setIsSimulating(false);
-    }
-  };
 
   return (
     <div
       className="floating-signals-container"
       id="floating-strategy-signals"
     >
-      {/* Expanded Floating Signal Card (Docked to bottom, constrained below navbar) */}
+      {/* Expanded Floating Signal Card (Read-Only Telemetry) */}
       {isOpen && (
         <div
           className="floating-signals-card"
           id="floating-signals-expanded-card"
         >
-          {/* Card Header (Sticky at top of card, never obscured) */}
+          {/* Card Header */}
           <div
             style={{
               display: 'flex',
@@ -95,153 +43,111 @@ export default function FloatingSignalWidget({
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Zap size={15} style={{ color: 'var(--g)' }} />
-              <h3 style={{ fontSize: '13px', margin: 0, fontWeight: 800 }}>Strategy Signals</h3>
+              <h3 style={{ fontSize: '13px', margin: 0, fontWeight: 800 }}>Strategy Signals Telemetry</h3>
               <span className="tiny" style={{ background: '#1c342c', color: '#45e0ad', padding: '1px 6px', borderRadius: '10px', fontWeight: 700 }}>
                 {signalCount}
               </span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              {onToggleAutoPilot ? (
-                <button
-                  type="button"
-                  onClick={() => onToggleAutoPilot(!isAutoPilotActive)}
-                  className={`tag ${isAutoPilotActive ? '' : 'blue'}`}
-                  style={{
-                    cursor: 'pointer',
-                    border: 0,
-                    fontSize: '9px',
-                    padding: '3px 8px',
-                    fontWeight: 700
-                  }}
-                  title="Click to toggle AutoPilot / Semi-Auto mode"
-                >
-                  {isAutoPilotActive ? '⚡ AUTOPILOT' : 'SEMI-AUTO'}
-                </button>
-              ) : (
-                <span className={`tag ${isAutoPilotActive ? '' : 'blue'}`} style={{ fontSize: '9px' }}>
-                  {isAutoPilotActive ? 'AUTOPILOT' : 'SEMI-AUTO'}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => setIsOpen(false)}
-                style={{
-                  background: 'rgba(255,255,255,0.06)',
-                  border: 0,
-                  borderRadius: '6px',
-                  color: 'var(--muted)',
-                  cursor: 'pointer',
-                  padding: '4px',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}
-                title="Minimize signals"
-              >
-                <ChevronDown size={16} />
-              </button>
-            </div>
+            <button
+              type="button"
+              className="btn ghost"
+              style={{ padding: '3px 6px', fontSize: '10.5px' }}
+              onClick={() => setIsOpen(false)}
+            >
+              <ChevronDown size={14} />
+            </button>
           </div>
 
-          {/* Scrollable Signal Content Container */}
-          <div style={{ overflowY: 'auto', flex: 1, padding: '12px 14px' }}>
-
-          {feedback && (
+          <div style={{ padding: '12px 14px' }}>
+            {/* AutoPilot Mode Indicator */}
             <div
               style={{
-                padding: '6px 10px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '8px 10px',
                 borderRadius: '8px',
-                fontSize: '10.5px',
-                marginBottom: '10px',
-                background: feedback.type === 'success' ? '#14382c' : '#451f25',
-                color: feedback.type === 'success' ? '#7ce8be' : '#ff9da7',
-                border: `1px solid ${feedback.type === 'success' ? '#29785e' : '#732c38'}`
+                background: isAutoPilotActive ? '#122e23' : '#1c262c',
+                border: `1px solid ${isAutoPilotActive ? '#216147' : 'var(--line)'}`,
+                marginBottom: '10px'
               }}
             >
-              {feedback.text}
-            </div>
-          )}
-
-          {/* Signal List */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {signals.length > 0 ? (
-              signals.map((sig, idx) => {
-                const sigId = sig.signal_id || sig.id;
-                const isBuy = sig.action === 'BUY';
-                const lot = sig.recommended_lot || sig.volume || 0.01;
-                return (
-                  <div
-                    key={sigId || `signal-${idx}`}
-                    style={{
-                      background: '#0e181f',
-                      border: '1px solid var(--line)',
-                      borderRadius: '12px',
-                      padding: '10px'
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontWeight: 800, fontSize: '13px' }}>{sig.symbol}</span>
-                        <span className={`tag ${isBuy ? '' : 'red'}`} style={{ fontSize: '9px' }}>
-                          {sig.action} {lot} lot
-                        </span>
-                      </div>
-                      <span className="tiny" style={{ color: 'var(--muted)' }}>
-                        {sig.timeframe || 'M15'}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', marginBottom: '4px' }}>
-                      {sig.reason || 'EMA 9/21 Cross + RSI Momentum'}
-                    </div>
-
-                    {(sig.entry_price || sig.sl || sig.tp) && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: 'var(--muted)', marginBottom: '8px' }}>
-                        <span>Entry: <strong style={{ color: 'var(--text)' }}>{sig.entry_price ? sig.entry_price.toFixed(sig.symbol?.includes('XAU') ? 2 : (sig.symbol?.includes('JPY') ? 3 : 5)) : '-'}</strong></span>
-                        <span>SL: <strong style={{ color: 'var(--red)' }}>{sig.sl ? sig.sl.toFixed(sig.symbol?.includes('XAU') ? 2 : (sig.symbol?.includes('JPY') ? 3 : 5)) : '-'}</strong></span>
-                        <span>TP: <strong style={{ color: 'var(--g)' }}>{sig.tp ? sig.tp.toFixed(sig.symbol?.includes('XAU') ? 2 : (sig.symbol?.includes('JPY') ? 3 : 5)) : '-'}</strong></span>
-                      </div>
-                    )}
-
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button
-                        type="button"
-                        className="btn"
-                        style={{ flex: 1, padding: '6px 8px', fontSize: '10.5px' }}
-                        onClick={() => handleApprove(sigId)}
-                        disabled={approvingId === sigId || isKillSwitchActive}
-                      >
-                        <CheckCircle2 size={12} />
-                        <span>{approvingId === sigId ? 'Executing...' : 'Approve'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="btn alt"
-                        style={{ padding: '6px 8px', fontSize: '10.5px' }}
-                        onClick={() => handleDismiss(sigId)}
-                      >
-                        <XCircle size={12} />
-                        <span>Dismiss</span>
-                      </button>
-                    </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Radio size={14} style={{ color: isAutoPilotActive ? 'var(--g)' : 'var(--muted)' }} />
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: isAutoPilotActive ? 'var(--g)' : '#fff' }}>
+                    {isAutoPilotActive ? 'AutoPilot: Autonomous Active' : 'AutoPilot: Standby (Observing)'}
                   </div>
-                );
-              })
-            ) : (
-              <div style={{ padding: '16px 8px', textAlign: 'center', color: 'var(--muted)', fontSize: '11px' }}>
-                <div>Tidak ada sinyal konfluensi baru saat ini.</div>
+                  <div className="tiny" style={{ color: 'var(--muted)', fontSize: '9.5px' }}>
+                    {isAutoPilotActive
+                      ? 'Semua sinyal konfluensi dieksekusi otomatis oleh robot'
+                      : 'Eksekusi otomatis dijeda'}
+                  </div>
+                </div>
+              </div>
+              {onToggleAutoPilot && (
                 <button
                   type="button"
-                  className="btn alt"
-                  style={{ marginTop: '8px', fontSize: '10px', padding: '5px 10px' }}
-                  onClick={handleSimulate}
-                  disabled={isSimulating}
+                  className={`btn ${isAutoPilotActive ? 'alt' : ''}`}
+                  style={{ fontSize: '10px', padding: '3px 8px' }}
+                  onClick={() => onToggleAutoPilot(!isAutoPilotActive)}
                 >
-                  <Sparkles size={11} />
-                  <span>{isSimulating ? 'Simulating...' : 'Simulate Confluence Signal'}</span>
+                  {isAutoPilotActive ? 'Jeda' : 'Aktifkan'}
                 </button>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+
+            {/* Read-Only Signal Feed */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {signals.length > 0 ? (
+                signals.map((sig, idx) => {
+                  const sigId = sig.signal_id || sig.id;
+                  const isBuy = sig.action === 'BUY';
+                  const lot = sig.recommended_lot || sig.volume || 0.01;
+                  return (
+                    <div
+                      key={sigId || `signal-${idx}`}
+                      style={{
+                        background: '#0e181f',
+                        border: '1px solid var(--line)',
+                        borderRadius: '12px',
+                        padding: '10px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontWeight: 800, fontSize: '13px' }}>{sig.symbol}</span>
+                          <span className={`tag ${isBuy ? '' : 'red'}`} style={{ fontSize: '9px' }}>
+                            {sig.action} {lot} lot
+                          </span>
+                        </div>
+                        <span className="tag" style={{ fontSize: '9px', background: 'rgba(69, 224, 173, 0.1)', color: 'var(--g)' }}>
+                          {isAutoPilotActive ? 'AUTO-ROBOT' : 'TELEMETRY'}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: '10.5px', color: 'var(--muted)', marginBottom: '4px' }}>
+                        {sig.reason || 'EMA 9/21 Confluence + RSI Momentum'}
+                      </div>
+
+                      {(sig.entry_price || sig.sl || sig.tp) && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: 'var(--muted)', marginTop: '6px' }}>
+                          <span>Entry: <strong style={{ color: 'var(--text)' }}>{sig.entry_price ? sig.entry_price.toFixed(sig.symbol?.includes('XAU') ? 2 : (sig.symbol?.includes('JPY') ? 3 : 5)) : '-'}</strong></span>
+                          <span>SL: <strong style={{ color: 'var(--red)' }}>{sig.sl ? sig.sl.toFixed(sig.symbol?.includes('XAU') ? 2 : (sig.symbol?.includes('JPY') ? 3 : 5)) : '-'}</strong></span>
+                          <span>TP: <strong style={{ color: 'var(--g)' }}>{sig.tp ? sig.tp.toFixed(sig.symbol?.includes('XAU') ? 2 : (sig.symbol?.includes('JPY') ? 3 : 5)) : '-'}</strong></span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <div style={{ padding: '16px 8px', textAlign: 'center', color: 'var(--muted)', fontSize: '11px' }}>
+                  <Activity size={20} style={{ opacity: 0.3, margin: '0 auto 6px' }} />
+                  <div>Tidak ada sinyal konfluensi baru saat ini.</div>
+                  <div style={{ fontSize: '10px', marginTop: '2px' }}>Engine memindai timeframe M15 & M5 secara otomatis.</div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -266,7 +172,7 @@ export default function FloatingSignalWidget({
           transition: 'all 0.2s ease'
         }}
         id="floating-signals-trigger-btn"
-        title="Strategy Recommendations & Semi-Auto Signals"
+        title="Live Strategy Signals Telemetry (Read-Only)"
       >
         <span
           className={`pulse-dot ${signalCount > 0 ? 'online' : ''}`}

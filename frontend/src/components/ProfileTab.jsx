@@ -35,9 +35,6 @@ export default function ProfileTab({
   pollInterval,
   onPollIntervalChange,
   onOpenMt5Modal,
-  onTriggerKillSwitch,
-  onUnlockEngine,
-  isUnlockingEngine,
   onResetDrawdown,
   isResettingDrawdown,
   onTestTelegram,
@@ -47,7 +44,6 @@ export default function ProfileTab({
   const metrics = bridgeStatus?.metrics || {};
   const isConnected = bridgeStatus?.is_connected || false;
   const terminalConnected = bridgeStatus?.terminal_connected || false;
-  const isKillSwitchActive = bridgeStatus?.is_kill_switch_active || false;
   const server = metrics.server || 'MetaQuotes-Demo';
   const accountNumber = metrics.account_number || 0;
   const currency = metrics.currency || 'USD';
@@ -384,51 +380,7 @@ export default function ProfileTab({
         </div>
       </div>
 
-      {/* Emergency Kill Switch */}
-      <div className="section" style={{ fontSize: '14px', fontWeight: 800, marginBottom: '10px' }}>
-        Emergency Kill Switch
-      </div>
 
-      <div className="card" style={{ marginBottom: '20px', borderColor: isKillSwitchActive ? 'var(--red)' : 'var(--line)' }}>
-        <div className="cardhead">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <AlertTriangle size={18} style={{ color: isKillSwitchActive ? 'var(--red)' : 'var(--amber)' }} />
-            <h3>Master Kill Switch</h3>
-          </div>
-          <span className={`tag ${isKillSwitchActive ? 'red' : ''}`}>
-            {isKillSwitchActive ? 'ACTIVE (ENGINE LOCKED)' : 'READY'}
-          </span>
-        </div>
-
-        <p className="sub" style={{ fontSize: '11.5px', marginBottom: '14px', lineHeight: 1.45 }}>
-          Menghentikan seluruh aktivitas trading secara darurat, melikuidasi posisi berjalan,
-          dan memutus eksekusi order MT5 hingga dibuka manual oleh trader.
-        </p>
-
-        <div className="btns">
-          {isKillSwitchActive ? (
-            <button
-              type="button"
-              className="btn"
-              onClick={onUnlockEngine}
-              disabled={isUnlockingEngine}
-              id="profile-unlock-engine-btn"
-            >
-              <span>{isUnlockingEngine ? 'Unlocking...' : 'Buka Kunci Engine (Disarm Kill Switch)'}</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="btn danger"
-              onClick={onTriggerKillSwitch}
-              id="profile-trigger-kill-switch-btn"
-            >
-              <AlertTriangle size={14} />
-              <span>Picu Emergency Kill Switch</span>
-            </button>
-          )}
-        </div>
-      </div>
 
       {/* Preferences & Telemetry */}
       <div className="section" style={{ fontSize: '14px', fontWeight: 800, marginBottom: '10px' }}>

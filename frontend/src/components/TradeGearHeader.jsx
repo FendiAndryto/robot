@@ -1,5 +1,5 @@
 import React from 'react';
-import { Monitor, Plus } from 'lucide-react';
+import { Monitor } from 'lucide-react';
 import { NAV_TABS } from '../constants/nav';
 
 export default function TradeGearHeader({
@@ -7,8 +7,7 @@ export default function TradeGearHeader({
   onSelectTab,
   isConnected,
   latency,
-  onOpenMt5Modal,
-  onOpenNewTrade
+  onOpenMt5Modal
 }) {
   return (
     <header className="tradegear-header" id="tradegear-header">
@@ -53,21 +52,6 @@ export default function TradeGearHeader({
 
       {/* Header Right Actions */}
       <div className="header-right">
-        {/* Quick New Trade Action */}
-        {onOpenNewTrade && (
-          <button
-            type="button"
-            className="btn"
-            onClick={onOpenNewTrade}
-            id="header-new-trade-btn"
-            title="Open Order Execution Drawer"
-            style={{ padding: '7px 12px', fontSize: '11px' }}
-          >
-            <Plus size={14} />
-            <span className="header-new-trade-text">New Trade</span>
-          </button>
-        )}
-
         {/* Live MT5 Terminal Web-GUI Button */}
         {onOpenMt5Modal && (
           <button

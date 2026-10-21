@@ -173,7 +173,7 @@ export default function JournalTab({ activeTab, closedTradesCount, onNavigateAI,
             All-Time Growth {allTimePnlPercent !== null ? `(${allTimePnlPercent >= 0 ? '+' : ''}${allTimePnlPercent.toFixed(1)}%)` : ''}
           </div>
           <div className="tiny" style={{ color: 'var(--muted)', marginTop: '2px', fontSize: '9.5px' }}>
-            {initialDeposit ? `Deposit: $${initialDeposit.toFixed(2)} ${isDepositOverridden ? '(Manual)' : '(MT5)'}` : 'Baseline deposit MT5'}
+            {initialDeposit ? `Saldo Awal: $${initialDeposit.toFixed(2)} ${isDepositOverridden ? '(Manual)' : '(MT5)'}` : 'Baseline saldo MT5'}
           </div>
         </div>
         <div className="card" id="journal-kpi-win-rate">

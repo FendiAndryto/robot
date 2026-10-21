@@ -1,65 +1,17 @@
-import React, { useState } from 'react';
-import { Layers, XCircle, AlertOctagon, CheckCircle2, AlertCircle } from 'lucide-react';
-import { api } from '../services/api';
+import React from 'react';
+import { Layers } from 'lucide-react';
 
 const formatCurrency = (val, currency = 'USD') => {
   if (val === null || val === undefined) return '$0.00';
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: currency || 'USD',
+    currency: currency,
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(val);
 };
 
-export default function PositionsTable({ positions = [], currency = 'USD', onActionCompleted }) {
-  const [closingTicket, setClosingTicket] = useState(null);
-  const [closingAll, setClosingAll] = useState(false);
-  const [actionFeedback, setActionFeedback] = useState(null);
-
-  const handleClosePosition = async (ticket) => {
-    setClosingTicket(ticket);
-    setActionFeedback(null);
-    try {
-      const res = await api.closePosition(ticket);
-      setActionFeedback({
-        type: 'success',
-        message: `Close order queued for Ticket #${ticket} (${res.command_id}).`
-      });
-      if (onActionCompleted) onActionCompleted();
-    } catch (err) {
-      setActionFeedback({
-        type: 'error',
-        message: err.message || `Failed to close position #${ticket}.`
-      });
-    } finally {
-      setClosingTicket(null);
-    }
-  };
-
-  const handleCloseAll = async () => {
-    if (!window.confirm('Are you sure you want to close ALL active trading positions immediately?')) {
-      return;
-    }
-    setClosingAll(true);
-    setActionFeedback(null);
-    try {
-      const res = await api.closeAllPositions();
-      setActionFeedback({
-        type: 'success',
-        message: `Close all positions queued (${res.command_id}). Dispatching to MT5.`
-      });
-      if (onActionCompleted) onActionCompleted();
-    } catch (err) {
-      setActionFeedback({
-        type: 'error',
-        message: err.message || 'Failed to close all positions.'
-      });
-    } finally {
-      setClosingAll(false);
-    }
-  };
-
+export default function PositionsTable({ positions = [], currency = 'USD' }) {
   const totalPnL = positions.reduce((acc, p) => acc + (p.pnl || 0), 0);
 
   return (
@@ -72,7 +24,7 @@ export default function PositionsTable({ positions = [], currency = 'USD', onAct
           <div>
             <h3 style={{ fontSize: '1.05rem', fontWeight: 700 }}>Active Open Positions</h3>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              {positions.length} active trade{positions.length === 1 ? '' : 's'} on MT5
+              {positions.length} active trade{positions.length === 1 ? '' : 's'} on MT5 · Full-Auto Telemetry
             </span>
           </div>
         </div>
@@ -92,41 +44,16 @@ export default function PositionsTable({ positions = [], currency = 'USD', onAct
                 {totalPnL >= 0 ? '+' : ''}{formatCurrency(totalPnL, currency)}
               </div>
             </div>
-
-            <button
-              onClick={handleCloseAll}
-              disabled={closingAll}
-              className="btn-close-all"
-              id="close-all-positions-btn"
-              title="Close all positions immediately"
-            >
-              <AlertOctagon size={15} />
-              <span>{closingAll ? 'Closing All...' : 'Close All'}</span>
-            </button>
           </div>
         )}
       </div>
-
-      {actionFeedback && (
-        <div
-          className={`order-feedback-banner ${actionFeedback.type === 'success' ? 'success' : 'error'}`}
-          style={{ margin: '1rem 0' }}
-        >
-          {actionFeedback.type === 'success' ? (
-            <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
-          ) : (
-            <AlertCircle size={16} style={{ flexShrink: 0 }} />
-          )}
-          <span>{actionFeedback.message}</span>
-        </div>
-      )}
 
       {positions.length === 0 ? (
         <div className="empty-positions-state" id="empty-positions-placeholder">
           <Layers size={36} style={{ opacity: 0.25, marginBottom: '0.5rem' }} />
           <p style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>No Active Open Positions</p>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Use the manual execution panel on the left to open a new trade on MT5.
+            Posisi akan dibuka secara otomatis oleh robot AutoPilot saat konfluensi sinyal terpenuhi.
           </span>
         </div>
       ) : (
@@ -141,8 +68,7 @@ export default function PositionsTable({ positions = [], currency = 'USD', onAct
                 <th>Open Price</th>
                 <th>Current</th>
                 <th>SL / TP</th>
-                <th>Profit / Loss</th>
-                <th style={{ textAlign: 'right' }}>Action</th>
+                <th style={{ textAlign: 'right' }}>Profit / Loss</th>
               </tr>
             </thead>
             <tbody>
@@ -171,22 +97,11 @@ export default function PositionsTable({ positions = [], currency = 'USD', onAct
                       className="font-mono"
                       style={{
                         fontWeight: 700,
+                        textAlign: 'right',
                         color: isProfit ? 'var(--accent-emerald)' : 'var(--accent-rose)'
                       }}
                     >
                       {isProfit ? '+' : ''}{formatCurrency(pos.pnl, currency)}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        onClick={() => handleClosePosition(pos.ticket)}
-                        disabled={closingTicket === pos.ticket}
-                        className="btn-close-pos"
-                        id={`close-btn-${pos.ticket}`}
-                        title={`Close Position #${pos.ticket}`}
-                      >
-                        <XCircle size={14} />
-                        <span>{closingTicket === pos.ticket ? 'Closing...' : 'Close'}</span>
-                      </button>
                     </td>
                   </tr>
                 );

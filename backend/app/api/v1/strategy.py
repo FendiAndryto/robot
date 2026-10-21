@@ -29,15 +29,15 @@ async def get_signals(
 
 @router.post(
     "/signals/{signal_id}/approve",
-    status_code=status.HTTP_200_OK,
-    summary="Semi-Auto: Approve recommended signal and execute order to MT5"
+    status_code=status.HTTP_403_FORBIDDEN,
+    summary="Semi-Auto signal approval disabled (Full-Auto trading only)"
 )
-async def approve_signal(
-    signal_id: str,
-    req: ApproveSignalRequest = ApproveSignalRequest(),
-    current_user: str = Depends(get_current_user)
-):
-    return strategy_engine.approve_signal(signal_id=signal_id, custom_lot=req.custom_lot)
+async def approve_signal():
+    from fastapi import HTTPException
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Semi-auto signal approval is disabled. Trading is strictly full-auto only via autonomous AutoPilot."
+    )
 
 
 @router.post(

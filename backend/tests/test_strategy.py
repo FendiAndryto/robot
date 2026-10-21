@@ -111,7 +111,7 @@ def test_generate_test_signal_and_list():
     assert signals[0]["signal_id"] == sig["signal_id"]
 
 
-def test_approve_signal_queues_order_to_mt5():
+def test_approve_signal_disabled_on_api_and_works_internally():
     auth_headers = get_auth_headers("admin")
 
     # 1. Create a test signal
@@ -123,18 +123,22 @@ def test_approve_signal_queues_order_to_mt5():
     assert gen_resp.status_code == 200
     signal_id = gen_resp.json()["signal_id"]
 
-    # 2. Approve signal with custom lot
+    # 2. Web API approve must be rejected with 403 Forbidden (Full-Auto trading only)
     approve_resp = client.post(
         f"/api/v1/strategy/signals/{signal_id}/approve",
         json={"custom_lot": 0.25},
         headers=auth_headers
     )
-    assert approve_resp.status_code == 200
-    approve_data = approve_resp.json()
-    assert approve_data["status"] == "approved"
-    assert approve_data["signal"]["status"] == "APPROVED"
+    assert approve_resp.status_code == 403
+    assert "Semi-auto signal approval is disabled" in approve_resp.json()["detail"]
 
-    # 3. Verify order was queued to bridge
+    # 3. Strategy engine internally can auto-execute the signal (as AutoPilot does)
+    from app.services.strategy_engine import strategy_engine
+    exec_res = strategy_engine.approve_signal(signal_id=signal_id, custom_lot=0.25)
+    assert exec_res["status"] == "approved"
+    assert exec_res["signal"].status == "APPROVED"
+
+    # 4. Verify order was queued to bridge
     hb_resp = client.post("/api/v1/bridge/heartbeat", json={
         "account_number": 12345,
         "server": "Demo",
@@ -149,25 +153,6 @@ def test_approve_signal_queues_order_to_mt5():
     assert commands[0]["action"] == "BUY"
     assert commands[0]["symbol"] == "XAUUSD"
     assert commands[0]["volume"] == 0.25
-
-
-def test_approve_signal_blocked_by_kill_switch():
-    auth_headers = get_auth_headers("admin")
-
-    # 1. Create signal
-    gen_resp = client.post("/api/v1/strategy/generate-test-signal", json={"symbol": "EURUSD"}, headers=auth_headers)
-    signal_id = gen_resp.json()["signal_id"]
-
-    # 2. Engage Kill Switch
-    client.post("/api/v1/risk/kill-switch", json={"reason": "Emergency Spike"}, headers=auth_headers)
-
-    # 3. Attempting to approve must fail with 403 Forbidden
-    approve_resp = client.post(
-        f"/api/v1/strategy/signals/{signal_id}/approve",
-        headers=auth_headers
-    )
-    assert approve_resp.status_code == 403
-    assert "locked by emergency Kill Switch" in approve_resp.json()["detail"]
 
 
 def test_dismiss_signal():
@@ -197,9 +182,9 @@ def test_dismiss_signal():
 
 
 def test_strategy_auth_guards():
-    # Attempting to approve without auth -> 401
+    # Attempting to approve -> 403 Forbidden (disabled)
     resp = client.post("/api/v1/strategy/signals/fake_id/approve")
-    assert resp.status_code == 401
+    assert resp.status_code == 403
 
     # Attempting to dismiss without auth -> 401
     resp = client.post("/api/v1/strategy/signals/fake_id/dismiss")

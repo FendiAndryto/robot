@@ -93,7 +93,7 @@ class AutoPilotService:
                 msg = "Autonomous Auto-Pilot mode ENGAGED. Strategy confluence signals will execute automatically."
             else:
                 self._is_autopilot_active = False
-                msg = "Autonomous Auto-Pilot mode DISENGAGED. Switched to manual / semi-auto approval mode."
+                msg = "Autonomous Auto-Pilot mode DISENGAGED. Robot switched to standby / observing mode."
 
         return {
             "status": "success",
