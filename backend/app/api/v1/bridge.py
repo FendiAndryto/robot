@@ -1,12 +1,10 @@
 import time
 from typing import List
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from app.models.bridge import (
     HeartbeatPayload,
     HeartbeatResponse,
     BridgeStatusResponse,
-    OrderRequest,
-    OrderResponse,
     PositionItem,
     MarketQuoteItem,
     TradeHistoryResponse,
@@ -99,7 +97,6 @@ async def get_equity_curve(range: str = "1M"):
     summary="Manual order execution disabled (Full-Auto trading only)"
 )
 async def submit_order():
-    from fastapi import HTTPException
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Manual order placement from web application is disabled. Trading is strictly full-auto only via autonomous AutoPilot."

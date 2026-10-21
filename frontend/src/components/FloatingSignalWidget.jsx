@@ -4,7 +4,8 @@ import {
   ChevronDown,
   ChevronUp,
   Activity,
-  Radio
+  Radio,
+  RefreshCw
 } from 'lucide-react';
 
 export default function FloatingSignalWidget({
@@ -48,14 +49,27 @@ export default function FloatingSignalWidget({
                 {signalCount}
               </span>
             </div>
-            <button
-              type="button"
-              className="btn ghost"
-              style={{ padding: '3px 6px', fontSize: '10.5px' }}
-              onClick={() => setIsOpen(false)}
-            >
-              <ChevronDown size={14} />
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              {onRefreshSignals && (
+                <button
+                  type="button"
+                  className="btn ghost"
+                  style={{ padding: '3px 6px', fontSize: '10.5px' }}
+                  onClick={onRefreshSignals}
+                  title="Refresh Signals"
+                >
+                  <RefreshCw size={12} />
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn ghost"
+                style={{ padding: '3px 6px', fontSize: '10.5px' }}
+                onClick={() => setIsOpen(false)}
+              >
+                <ChevronDown size={14} />
+              </button>
+            </div>
           </div>
 
           <div style={{ padding: '12px 14px' }}>

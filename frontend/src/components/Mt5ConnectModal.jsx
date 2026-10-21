@@ -1,15 +1,12 @@
 import React, { useState } from 'react';
 import {
-  Monitor,
   X,
   CheckCircle2,
   AlertTriangle,
   RefreshCw,
-  Cpu,
   Laptop,
   Check,
-  ShieldCheck,
-  Zap
+  ShieldCheck
 } from 'lucide-react';
 
 export default function Mt5ConnectModal({

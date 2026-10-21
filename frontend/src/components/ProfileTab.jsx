@@ -5,7 +5,6 @@ import {
   ShieldCheck,
   Monitor,
   Send,
-  AlertTriangle,
   RotateCcw,
   Clock,
   KeyRound,

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BookOpen, Calendar, ArrowUpRight, RefreshCw, Layers } from 'lucide-react';
 import { api } from '../services/api';
 
-const formatCurrency = (val, currency = 'USD') => {
+const formatCurrency = (val) => {
   if (val === null || val === undefined || isNaN(val)) return '$0.00';
   const prefix = val >= 0 ? '+' : '−';
   return `${prefix}$${Math.abs(val).toFixed(2)}`;

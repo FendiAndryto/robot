@@ -1,8 +1,7 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.models.strategy import (
     SignalItem,
-    ApproveSignalRequest,
     DismissSignalRequest,
     StrategyConfigResponse,
     TestSignalRequest,
@@ -32,8 +31,7 @@ async def get_signals(
     status_code=status.HTTP_403_FORBIDDEN,
     summary="Semi-Auto signal approval disabled (Full-Auto trading only)"
 )
-async def approve_signal():
-    from fastapi import HTTPException
+async def approve_signal(signal_id: str):
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Semi-auto signal approval is disabled. Trading is strictly full-auto only via autonomous AutoPilot."
