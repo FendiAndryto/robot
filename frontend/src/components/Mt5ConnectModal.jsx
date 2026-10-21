@@ -164,9 +164,9 @@ export default function Mt5ConnectModal({
             <div className="mt5-step-card">
               <div className="mt5-step-number">2</div>
               <div className="mt5-step-content">
-                <strong>Pasang BridgeEA pada Chart</strong>
+                <strong>Whitelist URL di MT5</strong>
                 <p>
-                  Drag <code>BridgeEA</code> ke chart aktif (cth: XAUUSD M15). Pada tab <em>Common</em>, centang <strong>Allow Algo Trading</strong> dan <strong>Allow DLL Imports</strong>.
+                  Buka menu MT5: <strong>Tools &gt; Options &gt; Expert Advisors</strong>. Centang <strong>Allow WebRequest for listed URL</strong> dan tambahkan: <code>{bridgeUrl}</code>.
                 </p>
               </div>
             </div>
@@ -174,9 +174,9 @@ export default function Mt5ConnectModal({
             <div className="mt5-step-card">
               <div className="mt5-step-number">3</div>
               <div className="mt5-step-content">
-                <strong>Konfirmasi URL Backend</strong>
+                <strong>Pasang BridgeEA pada Chart</strong>
                 <p>
-                  Pada tab <em>Inputs</em>, pastikan <code>InpBackendUrl</code> mengarah ke <code>{bridgeUrl}</code>, lalu klik OK.
+                  Drag <code>BridgeEA</code> ke chart aktif (cth: XAUUSD M15). Pada tab <em>Common</em>, centang <strong>Allow Algo Trading</strong> (Pure WebRequest, siap untuk MQL5 VPS tanpa perlu DLL).
                 </p>
               </div>
             </div>

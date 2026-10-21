@@ -10,12 +10,17 @@ from app.core.security import create_access_token
 client = TestClient(app)
 
 
+from app.core.config import settings
+
 @pytest.fixture(autouse=True)
 def clean_state():
+    old_session_filter = settings.STRATEGY_ENABLE_SESSION_FILTER
+    settings.STRATEGY_ENABLE_SESSION_FILTER = False
     bridge_service.reset_state()
     strategy_engine.reset_state()
     autopilot_service.reset_state()
     yield
+    settings.STRATEGY_ENABLE_SESSION_FILTER = old_session_filter
     bridge_service.reset_state()
     strategy_engine.reset_state()
     autopilot_service.reset_state()

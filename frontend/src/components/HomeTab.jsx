@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   DollarSign,
   Activity,
@@ -7,12 +7,13 @@ import {
   Layers,
   Plus,
   RefreshCw,
-  XCircle
+  XCircle,
+  Edit2
 } from 'lucide-react';
 import { api } from '../services/api';
 
 const formatCurrency = (val, currency = 'USD') => {
-  if (val === null || val === undefined) return '$0.00';
+  if (val === null || val === undefined || isNaN(val)) return '$0.00';
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: currency || 'USD',
@@ -30,10 +31,16 @@ export default function HomeTab({
   onNavigateMarket,
   onRefresh
 }) {
-  const [chartRange, setChartRange] = useState('1M');
+  const [chartRange, setChartRange] = useState('Month');
   const [closingTicket, setClosingTicket] = useState(null);
   const [equityCurveData, setEquityCurveData] = useState(null);
   const [historyData, setHistoryData] = useState(null);
+
+  // Initial Deposit Quick-Edit Modal States
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
+  const [depositInput, setDepositInput] = useState('');
+  const [isSavingDeposit, setIsSavingDeposit] = useState(false);
+  const [depositSaveMsg, setDepositSaveMsg] = useState(null);
 
   const metrics = bridgeStatus?.metrics || {};
   const isConnected = bridgeStatus?.is_connected || false;
@@ -46,12 +53,28 @@ export default function HomeTab({
   const floatingPnl = positions.length > 0 ? calculatedFloatingPnl : (metrics.floating_pnl ?? 0);
   const marketQuotes = bridgeStatus?.market_quotes || [];
 
-  React.useEffect(() => {
+  // Initial Deposit & All-Time Performance Calculations
+  const initialDeposit = bridgeStatus?.initial_deposit ?? metrics.initial_deposit ?? balance;
+  const isDepositOverridden = bridgeStatus?.is_deposit_overridden ?? false;
+  const settledPnl = bridgeStatus?.settled_pnl !== undefined && bridgeStatus?.settled_pnl !== null
+    ? bridgeStatus.settled_pnl
+    : (balance - initialDeposit);
+  const settledPnlPercent = bridgeStatus?.settled_pnl_percent !== undefined && bridgeStatus?.settled_pnl_percent !== null
+    ? bridgeStatus.settled_pnl_percent
+    : (initialDeposit > 0 ? ((balance - initialDeposit) / initialDeposit) * 100 : 0);
+  const allTimePnl = bridgeStatus?.all_time_pnl !== undefined && bridgeStatus?.all_time_pnl !== null
+    ? bridgeStatus.all_time_pnl
+    : (equity - initialDeposit);
+  const allTimePnlPercent = bridgeStatus?.all_time_pnl_percent !== undefined && bridgeStatus?.all_time_pnl_percent !== null
+    ? bridgeStatus.all_time_pnl_percent
+    : (initialDeposit > 0 ? ((equity - initialDeposit) / initialDeposit) * 100 : 0);
+
+  useEffect(() => {
     let isMounted = true;
     const fetchData = async () => {
       try {
         const [curve, history] = await Promise.all([
-          api.getEquityCurve().catch(() => null),
+          api.getEquityCurve(chartRange).catch(() => null),
           api.getTradeHistory().catch(() => null)
         ]);
         if (!isMounted) return;
@@ -65,7 +88,7 @@ export default function HomeTab({
     return () => {
       isMounted = false;
     };
-  }, [bridgeStatus]);
+  }, [bridgeStatus, chartRange]);
 
   const handleClosePosition = async (ticket) => {
     if (!window.confirm(`Konfirmasi tutup posisi ticket #${ticket}?`)) return;
@@ -77,6 +100,47 @@ export default function HomeTab({
       alert(`Gagal menutup posisi: ${err.message || 'Error'}`);
     } finally {
       setClosingTicket(null);
+    }
+  };
+
+  const handleSaveInitialDeposit = async () => {
+    const num = parseFloat(depositInput);
+    if (isNaN(num) || num <= 0) {
+      setDepositSaveMsg({ type: 'error', text: 'Masukkan nominal deposit awal yang valid (> 0).' });
+      return;
+    }
+    setIsSavingDeposit(true);
+    setDepositSaveMsg(null);
+    try {
+      await api.setInitialDeposit(num);
+      if (onRefresh) onRefresh();
+      setDepositSaveMsg({ type: 'success', text: 'Deposit saldo awal berhasil diperbarui!' });
+      setTimeout(() => {
+        setIsDepositModalOpen(false);
+        setDepositSaveMsg(null);
+      }, 700);
+    } catch (err) {
+      setDepositSaveMsg({ type: 'error', text: err.message || 'Gagal menyimpan deposit awal.' });
+    } finally {
+      setIsSavingDeposit(false);
+    }
+  };
+
+  const handleResetInitialDeposit = async () => {
+    setIsSavingDeposit(true);
+    setDepositSaveMsg(null);
+    try {
+      await api.setInitialDeposit(null);
+      if (onRefresh) onRefresh();
+      setDepositSaveMsg({ type: 'success', text: 'Berhasil dikembalikan ke deteksi otomatis MT5!' });
+      setTimeout(() => {
+        setIsDepositModalOpen(false);
+        setDepositSaveMsg(null);
+      }, 700);
+    } catch (err) {
+      setDepositSaveMsg({ type: 'error', text: err.message || 'Gagal mereset deposit awal.' });
+    } finally {
+      setIsSavingDeposit(false);
     }
   };
 
@@ -168,19 +232,63 @@ export default function HomeTab({
 
       {/* KPIs Grid */}
       <div className="grid kpis">
-        {/* Total Balance */}
+        {/* Total Balance Card with Initial Deposit & Settled P/L */}
         <div className="card" id="home-kpi-balance">
           <div className="cardhead">
             <span className="label">Total Balance</span>
-            <span className="icon-box">
-              <DollarSign size={16} />
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setDepositInput(initialDeposit > 0 ? String(initialDeposit) : '');
+                  setDepositSaveMsg(null);
+                  setIsDepositModalOpen(true);
+                }}
+                title="Sesuaikan Modal Awal (Deposit)"
+                style={{
+                  background: 'rgba(69, 224, 173, 0.1)',
+                  border: '1px solid rgba(69, 224, 173, 0.25)',
+                  color: 'var(--g)',
+                  padding: '3px 7px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '10px',
+                  fontWeight: 600
+                }}
+                id="edit-initial-deposit-btn"
+              >
+                <Edit2 size={10} />
+                <span>Deposit</span>
+              </button>
+              <span className="icon-box">
+                <DollarSign size={16} />
+              </span>
+            </div>
           </div>
           <div className="metric">{formatCurrency(balance, currency)}</div>
-          <div className="delta">Settled funds</div>
+          <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '6px' }}>
+            <div style={{ color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
+              <span>Deposit Awal:</span>
+              <span style={{ fontWeight: 600, color: '#e6f1f2' }}>
+                {formatCurrency(initialDeposit, currency)}
+                <small style={{ marginLeft: '4px', fontSize: '9px', color: isDepositOverridden ? 'var(--amber)' : 'var(--muted)' }}>
+                  {isDepositOverridden ? '(Manual)' : '(MT5)'}
+                </small>
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+              <span style={{ color: 'var(--muted)' }}>All-Time P/L:</span>
+              <span style={{ color: settledPnl >= 0 ? 'var(--g)' : 'var(--red)' }}>
+                {settledPnl >= 0 ? '+' : ''}{formatCurrency(settledPnl, currency)} ({settledPnlPercent >= 0 ? '+' : ''}{settledPnlPercent.toFixed(1)}%)
+              </span>
+            </div>
+          </div>
         </div>
 
-        {/* Equity */}
+        {/* Account Equity Card with Real-time P/L vs Deposit & Floating Risk */}
         <div className="card" id="home-kpi-equity">
           <div className="cardhead">
             <span className="label">Account Equity</span>
@@ -189,12 +297,23 @@ export default function HomeTab({
             </span>
           </div>
           <div className="metric">{formatCurrency(equity, currency)}</div>
-          <div className="delta" style={{ color: floatingPnl >= 0 ? 'var(--g)' : 'var(--red)' }}>
-            Floating {floatingPnl >= 0 ? '+' : ''}{formatCurrency(floatingPnl, currency)}
+          <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+              <span style={{ color: 'var(--muted)' }}>Riil vs Deposit:</span>
+              <span style={{ color: allTimePnl >= 0 ? 'var(--g)' : 'var(--red)' }}>
+                {allTimePnl >= 0 ? '+' : ''}{formatCurrency(allTimePnl, currency)} ({allTimePnlPercent >= 0 ? '+' : ''}{allTimePnlPercent.toFixed(1)}%)
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px' }}>
+              <span style={{ color: 'var(--muted)' }}>Floating Risk:</span>
+              <span style={{ color: floatingPnl >= 0 ? 'var(--g)' : 'var(--red)', fontWeight: 600 }}>
+                {floatingPnl >= 0 ? '+' : ''}{formatCurrency(floatingPnl, currency)}
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Today's P/L */}
+        {/* Floating P/L */}
         <div className="card" id="home-kpi-today-pnl">
           <div className="cardhead">
             <span className="label">Floating P/L</span>
@@ -222,23 +341,23 @@ export default function HomeTab({
             {openPositionsCount.toString().padStart(2, '0')}{' '}
             <span className="sub" style={{ fontSize: '12px' }}>posisi</span>
           </div>
-          <div className="delta" style={{ color: 'var(--amber)' }}>
+          <div className="delta" style={{ color: isConnected ? 'var(--g)' : 'var(--red)' }}>
             {isConnected ? 'Bridge Synchronized' : 'Bridge Offline'}
           </div>
         </div>
       </div>
 
-      {/* Account Performance Curve & Market Brief */}
-      <div className="grid two" style={{ marginBottom: '20px' }}>
-        {/* Real Performance Chart */}
-        <div className="card">
+      {/* Grid Two (Side-by-Side Above Fold): Account Performance (Kiri) & Active Trades (Kanan) */}
+      <div className="grid two" style={{ marginBottom: '20px', alignItems: 'stretch' }}>
+        {/* Real Performance Chart (Kolom Kiri) */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div className="cardhead">
             <div>
               <h3>Account Performance</h3>
-              <div className="tiny">Live MT5 Equity Growth Curve</div>
+              <div className="tiny">Live MT5 Performance Curve ({chartRange})</div>
             </div>
             <div style={{ display: 'flex', gap: '3px', background: '#0a1419', padding: '3px', borderRadius: '8px', border: '1px solid var(--line)' }}>
-              {['1W', '1M', '3M', 'ALL'].map((rng) => (
+              {['Day', 'Week', 'Month'].map((rng) => (
                 <button
                   key={rng}
                   type="button"
@@ -248,11 +367,12 @@ export default function HomeTab({
                     color: chartRange === rng ? '#b8ffe6' : 'var(--muted)',
                     fontSize: '10px',
                     fontWeight: 700,
-                    padding: '5px 8px',
+                    padding: '5px 9px',
                     borderRadius: '6px',
                     cursor: 'pointer'
                   }}
                   onClick={() => setChartRange(rng)}
+                  id={`chart-filter-${rng.toLowerCase()}-btn`}
                 >
                   {rng}
                 </button>
@@ -264,6 +384,10 @@ export default function HomeTab({
             const points = equityCurveData?.points || [];
             let pathD = '';
             let areaD = '';
+
+            const isNetPositive = (equityCurveData?.current_equity ?? equity) >= (equityCurveData?.starting_equity ?? equity);
+            const strokeColor = isNetPositive ? '#45e0ad' : '#ff5b6b';
+            const gradientId = isNetPositive ? 'tradegear-area-pos' : 'tradegear-area-neg';
 
             if (points.length >= 2) {
               const equities = points.map((p) => p.equity);
@@ -287,37 +411,150 @@ export default function HomeTab({
             }
 
             return (
-              <svg className="chart" viewBox="0 0 600 180" preserveAspectRatio="none" style={{ width: '100%', height: '175px', display: 'block' }}>
+              <svg className="chart" viewBox="0 0 600 180" preserveAspectRatio="none" style={{ width: '100%', height: '175px', display: 'block', margin: '4px 0' }}>
                 <defs>
-                  <linearGradient id="tradegear-area" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0" stopColor="#45e0ad" stopOpacity="0.25" />
+                  <linearGradient id="tradegear-area-pos" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stopColor="#45e0ad" stopOpacity="0.30" />
                     <stop offset="1" stopColor="#45e0ad" stopOpacity="0" />
+                  </linearGradient>
+                  <linearGradient id="tradegear-area-neg" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stopColor="#ff5b6b" stopOpacity="0.30" />
+                    <stop offset="1" stopColor="#ff5b6b" stopOpacity="0" />
                   </linearGradient>
                 </defs>
                 <g stroke="#1e343d" strokeDasharray="4 7">
                   <path d="M0 35H600M0 75H600M0 115H600M0 155H600" />
                 </g>
-                <path d={areaD} fill="url(#tradegear-area)" />
-                <path d={pathD} fill="none" stroke="#45e0ad" strokeWidth="2.5" strokeLinecap="round" />
+                <path d={areaD} fill={`url(#${gradientId})`} />
+                <path d={pathD} fill="none" stroke={strokeColor} strokeWidth="2.5" strokeLinecap="round" />
               </svg>
             );
           })()}
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)', fontSize: '9px', marginTop: '6px' }}>
-            <span>Live Equity Baseline: {formatCurrency(equity, currency)}</span>
-            <span>Balance: {formatCurrency(balance, currency)}</span>
-            <span>Floating: {floatingPnl >= 0 ? '+' : ''}{formatCurrency(floatingPnl, currency)}</span>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)', fontSize: '9.5px', marginTop: '6px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '6px' }}>
+            <span>Awal {chartRange}: {formatCurrency(equityCurveData?.starting_equity ?? balance, currency)}</span>
+            <span>Equity Riil: {formatCurrency(equity, currency)}</span>
+            <span style={{ fontWeight: 700, color: (equityCurveData?.all_time_pnl ?? allTimePnl) >= 0 ? 'var(--g)' : 'var(--red)' }}>
+              Net: {(equityCurveData?.all_time_pnl ?? allTimePnl) >= 0 ? '+' : ''}{formatCurrency(equityCurveData?.all_time_pnl ?? allTimePnl, currency)}
+            </span>
           </div>
         </div>
 
-        {/* Real Live Market Brief Card */}
-        <div className="card">
+        {/* Active Trades Card (Kolom Kanan) - Langsung terlihat tanpa scroll */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="cardhead">
-            <h3>Live Market Feed</h3>
-            <span className="tag blue">MT5 TELEMETRY</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Layers size={16} style={{ color: 'var(--g)' }} />
+              <div>
+                <h3 style={{ margin: 0, fontSize: '13px' }}>Active Trades</h3>
+                <div className="tiny">{positions.length} running on MT5</div>
+              </div>
+            </div>
+            {onOpenNewTrade && (
+              <button
+                type="button"
+                className="btn alt"
+                style={{ fontSize: '10px', padding: '4px 9px' }}
+                onClick={onOpenNewTrade}
+                id="home-active-trades-quick-new-btn"
+              >
+                <Plus size={11} />
+                <span>+ Trade</span>
+              </button>
+            )}
           </div>
 
-          {marketQuotes.length > 0 ? (
-            marketQuotes.slice(0, 2).map((q) => {
+          <div style={{ flex: 1, maxHeight: '215px', overflowY: 'auto', paddingRight: '4px' }}>
+            {positions.length > 0 ? (
+              positions.map((pos) => {
+                const isBuy = String(pos.type || '').toUpperCase() === 'BUY' || pos.type === 0;
+                const profit = pos.pnl !== undefined ? pos.pnl : (pos.profit ?? 0);
+                return (
+                  <div key={pos.ticket} className="row" style={{ padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div className="coin" style={{ fontSize: '11px', width: '30px', height: '30px' }}>
+                      {pos.symbol?.slice(0, 2).toUpperCase() || 'FX'}
+                    </div>
+                    <div className="grow">
+                      <div className="rowtitle" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+                        <span>{pos.symbol}</span>
+                        <span className={`tag ${!isBuy ? 'red' : ''}`} style={{ fontSize: '9px', padding: '1px 5px' }}>
+                          {isBuy ? 'BUY' : 'SELL'}
+                        </span>
+                        <span className="tiny" style={{ color: 'var(--muted)', fontSize: '10px' }}>
+                          #{pos.ticket}
+                        </span>
+                      </div>
+                      <div className="rowsub" style={{ fontSize: '10.5px' }}>
+                        {pos.volume} lot · Entry @ {pos.open_price}
+                        {pos.current_price ? ` · Now ${pos.current_price}` : ''}
+                      </div>
+                    </div>
+                    <div className="end" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ color: profit >= 0 ? 'var(--g)' : 'var(--red)', fontWeight: 800, fontSize: '12px' }}>
+                          {profit >= 0 ? '+' : ''}{formatCurrency(profit, currency)}
+                        </div>
+                        <small style={{ fontSize: '9px', color: 'var(--muted)' }}>Floating</small>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn alt"
+                        style={{ padding: '5px 7px', fontSize: '10px', color: 'var(--red)', border: '1px solid rgba(255,91,107,0.3)' }}
+                        onClick={() => handleClosePosition(pos.ticket)}
+                        disabled={closingTicket === pos.ticket}
+                        title="Tutup posisi segera di MT5"
+                        id={`close-pos-${pos.ticket}-btn`}
+                      >
+                        <XCircle size={13} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div style={{ padding: '36px 12px', textAlign: 'center', color: 'var(--muted)' }}>
+                <div style={{ fontSize: '12px', marginBottom: '8px' }}>Tidak ada posisi aktif yang sedang berjalan di terminal MT5.</div>
+                {onOpenNewTrade && (
+                  <button
+                    type="button"
+                    className="btn alt"
+                    style={{ fontSize: '11px', margin: '0 auto' }}
+                    onClick={onOpenNewTrade}
+                  >
+                    <Plus size={12} />
+                    <span>Buka Posisi Baru</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Real Live Market Brief Card (Pindah ke Bawah Grid Two) */}
+      <div className="card" style={{ marginBottom: '20px' }}>
+        <div className="cardhead">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Activity size={16} style={{ color: 'var(--cyan)' }} />
+            <h3 style={{ margin: 0, fontSize: '13px' }}>Live Market Feed</h3>
+            <span className="tag blue" style={{ fontSize: '9px' }}>MT5 TELEMETRY</span>
+          </div>
+          {onNavigateMarket && (
+            <button
+              type="button"
+              className="btn ghost"
+              style={{ fontSize: '11px', padding: '4px 8px' }}
+              onClick={onNavigateMarket}
+              id="home-open-market-btn"
+            >
+              <span>Overview Semua Instrumen ({marketQuotes.length}) →</span>
+            </button>
+          )}
+        </div>
+
+        {marketQuotes.length > 0 ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginTop: '10px' }}>
+            {marketQuotes.slice(0, 4).map((q) => {
               const isPos = q.daily_change_pct >= 0;
               const isCrypto = q.symbol.includes('BTC');
               const isGold = q.symbol.includes('XAU');
@@ -325,129 +562,25 @@ export default function HomeTab({
               const priceStr = q.bid > 0 ? (isCrypto || isGold ? `$${q.bid.toFixed(q.digits)}` : q.bid.toFixed(q.digits)) : '—';
 
               return (
-                <div key={q.symbol} className="row" style={{ padding: '8px 0' }}>
-                  <div className="coin">{icon}</div>
+                <div key={q.symbol} style={{ background: '#0a1419', border: '1px solid var(--line)', borderRadius: '10px', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div className="coin" style={{ fontSize: '11px', width: '32px', height: '32px' }}>{icon}</div>
                   <div className="grow">
-                    <div className="rowtitle">{q.symbol}</div>
-                    <div className="rowsub">
-                      Spread {q.spread} pts · High {q.high.toFixed(q.digits)} / Low {q.low.toFixed(q.digits)}
-                    </div>
+                    <div style={{ fontWeight: 700, fontSize: '12px' }}>{q.symbol}</div>
+                    <div style={{ fontSize: '10px', color: 'var(--muted)' }}>Spread {q.spread} pts</div>
                   </div>
-                  <div className="end">
-                    {priceStr}
-                    <small className={isPos ? 'positive' : 'negative'}>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontWeight: 700, fontSize: '12px', fontFamily: 'monospace' }}>{priceStr}</div>
+                    <small className={isPos ? 'positive' : 'negative'} style={{ fontSize: '10px', fontWeight: 600 }}>
                       {isPos ? '+' : ''}{q.daily_change_pct.toFixed(2)}%
                     </small>
                   </div>
                 </div>
               );
-            })
-          ) : (
-            <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--muted)', fontSize: '12px' }}>
-              Sinkronisasi harga instrumen dari MT5 lokal laptop...
-            </div>
-          )}
-
-          <div className="sub" style={{ marginTop: '10px', fontSize: '11px', color: 'var(--muted)' }}>
-            Feed harga langsung ditransmisikan oleh EA dari MetaTrader 5 setiap 1 detik.
+            })}
           </div>
-          {onNavigateMarket && (
-            <button
-              type="button"
-              className="btn alt"
-              style={{ marginTop: '12px', width: '100%' }}
-              onClick={onNavigateMarket}
-              id="home-open-market-btn"
-            >
-              <span>Buka Market Overview ({marketQuotes.length} instrumen) →</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Active Trades Section */}
-      <div className="section" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Layers size={16} style={{ color: 'var(--g)' }} />
-          <span style={{ fontSize: '14px', fontWeight: 800 }}>Active Trades</span>
-          <span className="tiny">({positions.length} running on MT5)</span>
-        </div>
-        {onNavigateJournal && (
-          <button
-            type="button"
-            className="btn ghost"
-            style={{ fontSize: '11px', padding: '5px 10px' }}
-            onClick={onNavigateJournal}
-            id="home-view-all-trades-btn"
-          >
-            <span>Semua transaksi →</span>
-          </button>
-        )}
-      </div>
-
-      <div className="card" style={{ marginBottom: '20px' }}>
-        {positions.length > 0 ? (
-          positions.map((pos) => {
-            const isBuy = String(pos.type || '').toUpperCase() === 'BUY' || pos.type === 0;
-            const profit = pos.pnl !== undefined ? pos.pnl : (pos.profit ?? 0);
-            return (
-              <div key={pos.ticket} className="row">
-                <div className="coin">
-                  {pos.symbol?.slice(0, 2).toUpperCase() || 'FX'}
-                </div>
-                <div className="grow">
-                  <div className="rowtitle" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>{pos.symbol}</span>
-                    <span className={`tag ${!isBuy ? 'red' : ''}`}>
-                      {isBuy ? 'BUY' : 'SELL'}
-                    </span>
-                    <span className="tiny" style={{ color: 'var(--muted)' }}>
-                      #{pos.ticket}
-                    </span>
-                  </div>
-                  <div className="rowsub">
-                    {pos.volume} lot · Entry @ {pos.open_price}
-                    {pos.current_price ? ` · Now @ ${pos.current_price}` : ''}
-                    {pos.sl ? ` · SL ${pos.sl}` : ''}
-                    {pos.tp ? ` · TP ${pos.tp}` : ''}
-                  </div>
-                </div>
-                <div className="end" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ color: profit >= 0 ? 'var(--g)' : 'var(--red)', fontWeight: 800 }}>
-                      {profit >= 0 ? '+' : ''}{formatCurrency(profit, currency)}
-                    </div>
-                    <small>Floating PnL</small>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn alt"
-                    style={{ padding: '6px 8px', fontSize: '11px', color: 'var(--red)' }}
-                    onClick={() => handleClosePosition(pos.ticket)}
-                    disabled={closingTicket === pos.ticket}
-                    title="Close position immediately on MT5"
-                    id={`close-pos-${pos.ticket}-btn`}
-                  >
-                    <XCircle size={14} />
-                  </button>
-                </div>
-              </div>
-            );
-          })
         ) : (
-          <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--muted)' }}>
-            <div>Tidak ada posisi aktif yang sedang berjalan di terminal MT5.</div>
-            {onOpenNewTrade && (
-              <button
-                type="button"
-                className="btn alt"
-                style={{ marginTop: '12px', fontSize: '11px' }}
-                onClick={onOpenNewTrade}
-              >
-                <Plus size={13} />
-                <span>Buka Posisi Baru</span>
-              </button>
-            )}
+          <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--muted)', fontSize: '12px' }}>
+            Sinkronisasi feed harga instrumen dari MT5 lokal laptop...
           </div>
         )}
       </div>
@@ -503,6 +636,123 @@ export default function HomeTab({
           })()}
         </div>
       </div>
+
+      {/* Modal Quick-Edit Initial Deposit */}
+      {isDepositModalOpen && (
+        <div className="modal-backdrop animate-fade-in" style={{ zIndex: 9999 }}>
+          <div
+            className="card glass-panel"
+            style={{
+              maxWidth: '460px',
+              width: '100%',
+              margin: 'auto',
+              background: '#0d171d',
+              border: '1px solid #29404a',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.8)'
+            }}
+          >
+            <div className="cardhead" style={{ borderBottom: '1px solid var(--line)', paddingBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <DollarSign size={18} style={{ color: 'var(--g)' }} />
+                <h3 style={{ margin: 0, fontSize: '14px' }}>Pengaturan Deposit Saldo Awal</h3>
+              </div>
+              <button
+                type="button"
+                className="btn ghost"
+                style={{ padding: '4px' }}
+                onClick={() => setIsDepositModalOpen(false)}
+              >
+                <XCircle size={16} />
+              </button>
+            </div>
+
+            <div style={{ padding: '16px 0', fontSize: '12px', color: '#c9d8dc', lineHeight: 1.5 }}>
+              <p style={{ margin: '0 0 12px' }}>
+                Sistem secara otomatis mendeteksi transaksi deposit pertama dari terminal MT5. Kamu dapat menyesuaikan nominal ini secara manual sebagai baseline perhitungan keuntungan bersih (All-Time P/L & ROI).
+              </p>
+
+              <div style={{ background: '#091014', border: '1px solid var(--line)', borderRadius: '8px', padding: '10px 12px', marginBottom: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '11px', color: 'var(--muted)' }}>
+                  <span>Status Deteksi:</span>
+                  <span style={{ color: isDepositOverridden ? 'var(--amber)' : 'var(--g)', fontWeight: 600 }}>
+                    {isDepositOverridden ? 'Manual Override Aktif' : 'Otomatis dari MT5'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                  <span>Deposit Efektif:</span>
+                  <span style={{ fontWeight: 700, color: '#fff' }}>
+                    {formatCurrency(initialDeposit, currency)}
+                  </span>
+                </div>
+              </div>
+
+              <label style={{ display: 'block', marginBottom: '6px', fontSize: '11px', fontWeight: 600, color: 'var(--muted)' }}>
+                NOMINAL DEPOSIT SALDO AWAL ({currency})
+              </label>
+              <input
+                type="number"
+                step="any"
+                min="1"
+                value={depositInput}
+                onChange={(e) => setDepositInput(e.target.value)}
+                placeholder="Contoh: 1000.00"
+                style={{
+                  width: '100%',
+                  background: '#091014',
+                  border: '1px solid var(--line)',
+                  borderRadius: '8px',
+                  color: '#fff',
+                  padding: '10px 12px',
+                  fontSize: '13px',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+                id="initial-deposit-input"
+              />
+
+              {depositSaveMsg && (
+                <div style={{ marginTop: '8px', fontSize: '11px', color: depositSaveMsg.type === 'error' ? 'var(--red)' : 'var(--g)' }}>
+                  {depositSaveMsg.text}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', borderTop: '1px solid var(--line)', paddingTop: '12px' }}>
+              <button
+                type="button"
+                className="btn alt"
+                style={{ fontSize: '11px' }}
+                disabled={isSavingDeposit}
+                onClick={handleResetInitialDeposit}
+                id="reset-initial-deposit-btn"
+              >
+                Reset ke Auto MT5
+              </button>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  style={{ fontSize: '11px' }}
+                  onClick={() => setIsDepositModalOpen(false)}
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ fontSize: '11px' }}
+                  disabled={isSavingDeposit || !depositInput}
+                  onClick={handleSaveInitialDeposit}
+                  id="save-initial-deposit-btn"
+                >
+                  {isSavingDeposit ? 'Menyimpan...' : 'Simpan Baseline'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

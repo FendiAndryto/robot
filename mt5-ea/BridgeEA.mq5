@@ -5,33 +5,11 @@
 //+------------------------------------------------------------------+
 #property copyright "Robot Trading System"
 #property link      "https://github.com/FendiAndryto/robot"
-#property version   "1.60"
-#property description "FastAPI Web-to-MT5 Telemetry & Scalping Protection EA v1.60"
+#property version   "1.80"
+#property description "FastAPI Web-to-MT5 Telemetry & Adaptive SL/TP Protection EA v1.80 (Pure WebRequest, MQL5 VPS Ready)"
 
 //--- Standard MT5 Trade Library
 #include <Trade\Trade.mqh>
-
-//--- WinINet Constants & Imports (64-bit MT5 for seamless networking)
-#define INTERNET_OPEN_TYPE_PRECONFIG 0
-#define INTERNET_SERVICE_HTTP        3
-#define INTERNET_FLAG_RELOAD         0x80000000
-#define INTERNET_FLAG_SECURE         0x00800000
-#define INTERNET_OPTION_CONNECT_TIMEOUT 2
-#define INTERNET_OPTION_RECEIVE_TIMEOUT 6
-#define INTERNET_OPTION_SEND_TIMEOUT    5
-#define HTTP_QUERY_STATUS_CODE          19
-#define HTTP_QUERY_FLAG_NUMBER          0x20000000
-
-#import "wininet.dll"
-  long InternetOpenW(string lpszAgent, uint dwAccessType, string lpszProxy, string lpszProxyBypass, uint dwFlags);
-  long InternetConnectW(long hInternet, string lpszServerName, ushort nServerPort, string lpszUsername, string lpszPassword, uint dwService, uint dwFlags, long dwContext);
-  long HttpOpenRequestW(long hConnect, string lpszVerb, string lpszObjectName, string lpszVersion, string lpszReferer, long lplpszAcceptTypes, uint dwFlags, long dwContext);
-  bool HttpSendRequestW(long hRequest, string lpszHeaders, uint dwHeadersLength, uchar &lpOptional[], uint dwOptionalLength);
-  bool HttpQueryInfoW(long hRequest, uint dwInfoLevel, uchar &lpBuffer[], uint &lpdwBufferLength, uint &lpdwIndex);
-  bool InternetReadFile(long hFile, uchar &lpBuffer[], uint dwNumberOfBytesToRead, uint &lpdwNumberOfBytesRead);
-  bool InternetSetOptionW(long hInternet, uint dwOption, uint &lpBuffer, uint dwBufferLength);
-  bool InternetCloseHandle(long hInternet);
-#import
 
 //--- Inputs
 input group "--- Bridge Settings ---"
@@ -41,13 +19,20 @@ input int    InpHistoryDays       = 30;                                        /
 input int    InpHeartbeatInterval = 1;                                         // Heartbeat interval in seconds
 input bool   InpVerboseLog        = false;                                     // Print detailed logs to Experts tab
 
+input group "--- SL / TP Protection Settings ---"
+input bool   InpEnforceMinSL      = true;                  // Enforce minimum safe SL distance (prevents noise hit)
+input int    InpMinSLPipsForex    = 30;                    // Minimum safe SL for Forex (30 pips)
+input int    InpMinSLPipsGold     = 45;                    // Minimum safe SL for Gold (45 pips = $4.50 on Gold)
+input int    InpMinSLPipsCrypto   = 150;                   // Minimum safe SL for Crypto / BTC (pips)
+input double InpDefaultRRRatio    = 1.8;                   // Default Risk-Reward Ratio (TP = SL * RR)
+
 input group "--- Scalping Protection Settings ---"
 input bool   InpEnableBEP         = false;                 // Enable Auto-Breakeven (Default: false to allow full TP runs)
-input int    InpBEPTriggerPips    = 18;                    // Profit pips to move SL to BEP (18 pips = $1.80 on Gold)
-input int    InpBEPBufferPips     = 2;                     // Lock-in pips above open price (2 pips = $0.20 on Gold)
+input int    InpBEPTriggerPips    = 35;                    // Profit pips to move SL to BEP (35 pips = $3.50 on Gold)
+input int    InpBEPBufferPips     = 4;                     // Lock-in pips above open price (4 pips = $0.40 on Gold)
 input bool   InpEnableTrailing    = false;                 // Enable Trailing Stop (Default: false)
-input int    InpTrailingDistPips  = 20;                    // Trailing Stop distance in pips (20 pips)
-input int    InpTrailingStepPips  = 5;                     // Trailing Stop step in pips (5 pips)
+input int    InpTrailingDistPips  = 40;                    // Trailing Stop distance in pips (40 pips)
+input int    InpTrailingStepPips  = 10;                    // Trailing Stop step in pips (10 pips)
 
 input group "--- Trade Settings ---"
 input ulong  InpMagicNumber       = 778899;                // Magic Number for orders
@@ -67,6 +52,7 @@ void ManagePositionsProtection();
 void SetSafeFillingType(string sym);
 string FindBrokerSymbol(string baseSym);
 int GetPointsPerPip(string sym);
+int GetMinSLPipsForSymbol(string sym);
 void GetDealPositionOpenDetails(ulong posId, double &openPrice, long &openTime);
 
 //+------------------------------------------------------------------+
@@ -74,9 +60,11 @@ void GetDealPositionOpenDetails(ulong posId, double &openPrice, long &openTime);
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(">>> [BridgeEA] Initializing MT5 FastAPI Bridge EA v1.60 (Pip-Aware Protection & Entry History Fix)...");
+   Print(">>> [BridgeEA] Initializing MT5 FastAPI Bridge EA v1.80 (Adaptive SL/TP Protection, MQL5 VPS Ready)...");
    Print(">>> [BridgeEA] Target Backend: ", InpBackendUrl);
    PrintFormat(">>> [BridgeEA] Magic Number: %I64u, Deviation: %I64u pts", InpMagicNumber, InpDeviationPoints);
+   PrintFormat(">>> [BridgeEA] Safe SL Barrier: Forex=%d pips | Gold=%d pips ($%.2f) | Crypto=%d pts | MinEnforce=%s",
+               InpMinSLPipsForex, InpMinSLPipsGold, (InpMinSLPipsGold * 0.10), InpMinSLPipsCrypto, (InpEnforceMinSL ? "YES" : "NO"));
    PrintFormat(">>> [BridgeEA] Protection: BEP=%s (Trig=%d pips, Buf=%d pips) | Trailing=%s (Dist=%d pips, Step=%d pips)",
                (InpEnableBEP ? "ON" : "OFF"), InpBEPTriggerPips, InpBEPBufferPips,
                (InpEnableTrailing ? "ON" : "OFF"), InpTrailingDistPips, InpTrailingStepPips);
@@ -125,135 +113,6 @@ void OnTick()
    ManagePositionsProtection();
 }
 
-//+------------------------------------------------------------------+
-//| Parse URL into host, port, useSSL                                |
-//+------------------------------------------------------------------+
-void ParseUrl(string url, string &host, ushort &port, bool &useSSL)
-{
-   useSSL = false;
-   port = 80;
-   string temp = url;
-   
-   if(StringFind(temp, "https://") == 0)
-   {
-      useSSL = true;
-      port = 443;
-      temp = StringSubstr(temp, 8);
-   }
-   else if(StringFind(temp, "http://") == 0)
-   {
-      useSSL = false;
-      port = 80;
-      temp = StringSubstr(temp, 7);
-   }
-   
-   int slashPos = StringFind(temp, "/");
-   if(slashPos >= 0)
-   {
-      temp = StringSubstr(temp, 0, slashPos);
-   }
-   
-   int colonPos = StringFind(temp, ":");
-   if(colonPos >= 0)
-   {
-      host = StringSubstr(temp, 0, colonPos);
-      port = (ushort)StringToInteger(StringSubstr(temp, colonPos + 1));
-   }
-   else
-   {
-      host = temp;
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Send HTTP POST via WinINet DLL (bypasses MT5 whitelist dialog)   |
-//+------------------------------------------------------------------+
-bool SendWinInetPost(string host, ushort port, bool useSSL, string path, string jsonPayload, string &responseStr)
-{
-   long hSession = InternetOpenW("RobotBridgeEA", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
-   if(hSession == 0)
-   {
-      Print(">>> [BridgeEA] WinINet InternetOpen failed. Error: ", GetLastError());
-      return false;
-   }
-   
-   // Set WinINet timeouts (2s) to prevent blocking the EA thread if backend is unreachable
-   uint timeoutMs = 2000;
-   InternetSetOptionW(hSession, INTERNET_OPTION_CONNECT_TIMEOUT, timeoutMs, 4);
-   InternetSetOptionW(hSession, INTERNET_OPTION_RECEIVE_TIMEOUT, timeoutMs, 4);
-   InternetSetOptionW(hSession, INTERNET_OPTION_SEND_TIMEOUT, timeoutMs, 4);
-   
-   long hConnect = InternetConnectW(hSession, host, port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
-   if(hConnect == 0)
-   {
-      Print(">>> [BridgeEA] WinINet InternetConnect failed. Host: ", host, ", Port: ", port, ", Error: ", GetLastError());
-      InternetCloseHandle(hSession);
-      return false;
-   }
-   
-   uint flags = INTERNET_FLAG_RELOAD;
-   if(useSSL) flags |= INTERNET_FLAG_SECURE;
-   
-   long hRequest = HttpOpenRequestW(hConnect, "POST", path, NULL, NULL, 0, flags, 0);
-   if(hRequest == 0)
-   {
-      Print(">>> [BridgeEA] WinINet HttpOpenRequest failed. Error: ", GetLastError());
-      InternetCloseHandle(hConnect);
-      InternetCloseHandle(hSession);
-      return false;
-   }
-   
-   string headers = "Content-Type: application/json\r\nAccept: application/json\r\n";
-   uchar postDataBytes[];
-   StringToCharArray(jsonPayload, postDataBytes, 0, StringLen(jsonPayload), CP_UTF8);
-   uint postLen = (uint)ArraySize(postDataBytes);
-   if(postLen > 0 && postDataBytes[postLen - 1] == 0) postLen--;
-   
-   bool sent = HttpSendRequestW(hRequest, headers, (uint)StringLen(headers), postDataBytes, postLen);
-   if(!sent)
-   {
-      Print(">>> [BridgeEA] WinINet HttpSendRequest failed. Error: ", GetLastError());
-      InternetCloseHandle(hRequest);
-      InternetCloseHandle(hConnect);
-      InternetCloseHandle(hSession);
-      return false;
-   }
-   
-   // Verify HTTP status code (must be 200 OK)
-   uint statusCode = 0;
-   uint statusLen = 4;
-   uint index = 0;
-   uchar statusBuf[4];
-   if(HttpQueryInfoW(hRequest, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, statusBuf, statusLen, index))
-   {
-      statusCode = (uint)(statusBuf[0] | (statusBuf[1] << 8) | (statusBuf[2] << 16) | (statusBuf[3] << 24));
-   }
-   if(statusCode != 200 && statusCode != 0)
-   {
-      PrintFormat(">>> [BridgeEA] WinINet HTTP response rejected with code %u", statusCode);
-      InternetCloseHandle(hRequest);
-      InternetCloseHandle(hConnect);
-      InternetCloseHandle(hSession);
-      return false;
-   }
-   
-   responseStr = "";
-   uchar readBuf[1024];
-   uint bytesRead = 0;
-   
-   while(true)
-   {
-      ArrayInitialize(readBuf, 0);
-      if(!InternetReadFile(hRequest, readBuf, 1023, bytesRead) || bytesRead == 0)
-         break;
-      responseStr += CharArrayToString(readBuf, 0, bytesRead, CP_UTF8);
-   }
-   
-   InternetCloseHandle(hRequest);
-   InternetCloseHandle(hConnect);
-   InternetCloseHandle(hSession);
-   return true;
-}
 
 //+------------------------------------------------------------------+
 //| Escape special characters for strict JSON compliance             |
@@ -433,8 +292,75 @@ void ProcessBackendCommands(string responseJson)
       PrintFormat(">>> [BridgeEA] Received Command [%s]: Action=%s Symbol=%s Vol=%.2f Ticket=%I64u",
                   cmdId, action, symbol, volume, ticket);
                   
-      // Normalize SL/TP to instrument digits
+      // Normalize SL/TP to instrument digits & enforce safe minimum distance
       int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+      double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+      int pointsPerPip = GetPointsPerPip(symbol);
+      double pipDistInPrice = (double)pointsPerPip * point;
+      int minSLPips = GetMinSLPipsForSymbol(symbol);
+      double minSLDist = (double)minSLPips * pipDistInPrice;
+
+      if(action == "BUY")
+      {
+         double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+         if(ask <= 0.0) ask = SymbolInfoDouble(symbol, SYMBOL_LAST);
+         if(ask <= 0.0) ask = SymbolInfoDouble(symbol, SYMBOL_BID);
+
+         if(sl <= 0.0)
+         {
+            sl = ask - minSLDist;
+            PrintFormat(">>> [BridgeEA] Auto-applied safe default BUY SL for %s: %.5f (-%d pips)", symbol, sl, minSLPips);
+         }
+         else if(InpEnforceMinSL && (ask - sl) < (minSLDist - (point * 0.5)))
+         {
+            double oldSL = sl;
+            sl = ask - minSLDist;
+            PrintFormat(">>> [BridgeEA] Widened narrow BUY SL for %s from %.5f to safe %.5f (-%d pips buffer to avoid noise hit)",
+                        symbol, oldSL, sl, minSLPips);
+         }
+
+         if(tp <= 0.0)
+         {
+            tp = ask + (minSLDist * InpDefaultRRRatio);
+            PrintFormat(">>> [BridgeEA] Auto-applied safe default BUY TP for %s: %.5f (1:%.1f RR)", symbol, tp, InpDefaultRRRatio);
+         }
+         else if(InpEnforceMinSL && (tp - ask) < (minSLDist * 1.0))
+         {
+            tp = ask + ((ask - sl) * InpDefaultRRRatio);
+            PrintFormat(">>> [BridgeEA] Adjusted BUY TP for %s to %.5f to maintain 1:%.1f RR", symbol, tp, InpDefaultRRRatio);
+         }
+      }
+      else if(action == "SELL")
+      {
+         double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+         if(bid <= 0.0) bid = SymbolInfoDouble(symbol, SYMBOL_LAST);
+         if(bid <= 0.0) bid = SymbolInfoDouble(symbol, SYMBOL_ASK);
+
+         if(sl <= 0.0)
+         {
+            sl = bid + minSLDist;
+            PrintFormat(">>> [BridgeEA] Auto-applied safe default SELL SL for %s: %.5f (+%d pips)", symbol, sl, minSLPips);
+         }
+         else if(InpEnforceMinSL && (sl - bid) < (minSLDist - (point * 0.5)))
+         {
+            double oldSL = sl;
+            sl = bid + minSLDist;
+            PrintFormat(">>> [BridgeEA] Widened narrow SELL SL for %s from %.5f to safe %.5f (+%d pips buffer to avoid noise hit)",
+                        symbol, oldSL, sl, minSLPips);
+         }
+
+         if(tp <= 0.0)
+         {
+            tp = bid - (minSLDist * InpDefaultRRRatio);
+            PrintFormat(">>> [BridgeEA] Auto-applied safe default SELL TP for %s: %.5f (1:%.1f RR)", symbol, tp, InpDefaultRRRatio);
+         }
+         else if(InpEnforceMinSL && (bid - tp) < (minSLDist * 1.0))
+         {
+            tp = bid - ((sl - bid) * InpDefaultRRRatio);
+            PrintFormat(">>> [BridgeEA] Adjusted SELL TP for %s to %.5f to maintain 1:%.1f RR", symbol, tp, InpDefaultRRRatio);
+         }
+      }
+
       if(digits > 0)
       {
          if(sl > 0.0) sl = NormalizeDouble(sl, digits);
@@ -592,6 +518,20 @@ int GetPointsPerPip(string sym)
 }
 
 //+------------------------------------------------------------------+
+//| Get minimum safe SL pips based on asset class                     |
+//+------------------------------------------------------------------+
+int GetMinSLPipsForSymbol(string sym)
+{
+   string upper = sym;
+   StringToUpper(upper);
+   if(StringFind(upper, "XAU") >= 0 || StringFind(upper, "GOLD") >= 0)
+      return InpMinSLPipsGold;
+   if(StringFind(upper, "BTC") >= 0)
+      return InpMinSLPipsCrypto;
+   return InpMinSLPipsForex;
+}
+
+//+------------------------------------------------------------------+
 //| Get Entry Price and Entry Time for a closed position's deals     |
 //+------------------------------------------------------------------+
 void GetDealPositionOpenDetails(ulong posId, double &openPrice, long &openTime)
@@ -616,11 +556,35 @@ void GetDealPositionOpenDetails(ulong posId, double &openPrice, long &openTime)
 }
 
 //+------------------------------------------------------------------+
+//| Get Initial Deposit from MT5 balance deals history               |
+//+------------------------------------------------------------------+
+double GetAccountInitialDeposit()
+{
+   HistorySelect(0, TimeCurrent());
+   int total = HistoryDealsTotal();
+   for(int i = 0; i < total; i++)
+   {
+      ulong t = HistoryDealGetTicket(i);
+      if(t > 0)
+      {
+         long type = HistoryDealGetInteger(t, DEAL_TYPE);
+         if(type == DEAL_TYPE_BALANCE)
+         {
+            double p = HistoryDealGetDouble(t, DEAL_PROFIT);
+            if(p > 0.0) return p;
+         }
+      }
+   }
+   return 0.0;
+}
+
+//+------------------------------------------------------------------+
 //| Build JSON array of closed trade history from MT5 deals          |
 //+------------------------------------------------------------------+
 string BuildClosedTradesJson()
 {
    datetime fromTime = TimeCurrent() - InpHistoryDays * 86400;
+
    HistorySelect(fromTime, TimeCurrent());
    int totalDeals = HistoryDealsTotal();
    
@@ -844,6 +808,9 @@ string BuildHeartbeatJson()
    double profit = AccountInfoDouble(ACCOUNT_PROFIT);
    if(!MathIsValidNumber(profit)) profit = 0.0;
    
+   double initial_deposit = GetAccountInitialDeposit();
+   if(!MathIsValidNumber(initial_deposit)) initial_deposit = 0.0;
+   
    bool connected = (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
    int positions = PositionsTotal();
    long timestamp = (long)TimeLocal();
@@ -900,6 +867,7 @@ string BuildHeartbeatJson()
       + "\"currency\":\"" + currency + "\","
       + StringFormat("\"balance\":%.2f,", balance)
       + StringFormat("\"equity\":%.2f,", equity)
+      + StringFormat("\"initial_deposit\":%.2f,", initial_deposit)
       + StringFormat("\"margin\":%.2f,", margin)
       + StringFormat("\"free_margin\":%.2f,", free_margin)
       + StringFormat("\"margin_level\":%.2f,", margin_level)
@@ -960,36 +928,20 @@ void SendHeartbeat()
       return;
    }
    
-   // 2. Fallback to WinINet if WebRequest is blocked by MT5 sandbox (Error 4014)
-   string host;
-   ushort port;
-   bool useSSL;
-   ParseUrl(InpBackendUrl, host, port, useSSL);
-   
-   string wininetResp;
-   if(SendWinInetPost(host, port, useSSL, "/api/v1/bridge/heartbeat", json, wininetResp))
-   {
-      g_last_heartbeat = TimeLocal();
-      g_consecutive_errors = 0;
-      g_status_msg = "Connected (WinINet Heartbeat OK)";
-      
-      ProcessBackendCommands(wininetResp);
-      
-      if(InpVerboseLog)
-      {
-         Print(">>> [BridgeEA] WinINet Heartbeat OK: ", wininetResp);
-      }
-      UpdateChartHUD(g_status_msg);
-      return;
-   }
-   
-   // 3. Both failed
+   // 2. Native WebRequest failed
    int err = GetLastError();
    g_consecutive_errors++;
-   g_status_msg = StringFormat("Connection Failed (Failures: %d)", g_consecutive_errors);
+   g_status_msg = StringFormat("Connection Failed (HTTP %d, Err %d)", res, err);
    if(g_consecutive_errors % 10 == 1)
    {
-      Print(">>> [BridgeEA] Heartbeat failed. WebRequest Err: ", err, " URL: ", endpoint);
+      if(err == 4014)
+      {
+         Print(">>> [BridgeEA] ERROR 4014: URL not allowed! Please add '", InpBackendUrl, "' to Tools -> Options -> Expert Advisors -> Allow WebRequest for listed URL.");
+      }
+      else
+      {
+         Print(">>> [BridgeEA] Heartbeat failed. HTTP: ", res, ", WebRequest Err: ", err, " URL: ", endpoint);
+      }
    }
    UpdateChartHUD(g_status_msg);
 }

@@ -33,6 +33,15 @@ class StrategyEngine:
             self._last_signal_time.clear()
 
     @staticmethod
+    def get_symbol_default_sl_pips(symbol: str) -> float:
+        sym = symbol.upper().strip()
+        if "XAU" in sym or "GOLD" in sym:
+            return getattr(settings, "STRATEGY_GOLD_SL_PIPS", 45.0)
+        elif "BTC" in sym:
+            return getattr(settings, "STRATEGY_CRYPTO_SL_PIPS", 150.0)
+        return settings.STRATEGY_DEFAULT_SL_PIPS
+
+    @staticmethod
     def calculate_ema(prices: List[float], period: int) -> List[float]:
         if len(prices) < period:
             return []
@@ -185,7 +194,7 @@ class StrategyEngine:
 
         # Calculate SL / TP and position size
         pip_size = risk_service.get_pip_size(sym)
-        sl_pips = settings.STRATEGY_DEFAULT_SL_PIPS
+        sl_pips = self.get_symbol_default_sl_pips(sym)
         tp_pips = sl_pips * settings.STRATEGY_DEFAULT_RR_RATIO
 
         if action == "BUY":
@@ -286,7 +295,8 @@ class StrategyEngine:
             else:
                 entry_price = 1.08650
 
-        sl_pips = req.sl_pips if (req.sl_pips and req.sl_pips > 0) else settings.STRATEGY_DEFAULT_SL_PIPS
+        default_sym_sl = self.get_symbol_default_sl_pips(sym)
+        sl_pips = req.sl_pips if (req.sl_pips and req.sl_pips > 0) else default_sym_sl
         rr_ratio = req.rr_ratio if (req.rr_ratio and req.rr_ratio > 0) else settings.STRATEGY_DEFAULT_RR_RATIO
         tp_pips = sl_pips * rr_ratio
 

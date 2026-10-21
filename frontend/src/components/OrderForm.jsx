@@ -18,7 +18,7 @@ import { api } from '../services/api';
 const QUICK_SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'BTCUSD'];
 const LOT_PRESETS = [0.01, 0.05, 0.10, 0.50, 1.00];
 const RISK_PRESETS = [0.5, 1.0, 2.0, 3.0];
-const SL_PIP_PRESETS = [10, 15, 25, 50, 100];
+const SL_PIP_PRESETS = [25, 30, 45, 60, 100];
 const SL_PERCENT_PRESETS = [0.2, 0.3, 0.5, 1.0, 1.5];
 
 export default function OrderForm({
@@ -39,7 +39,7 @@ export default function OrderForm({
   // Stop Loss & Sizing Mode: 'pips' | 'price' | 'percent'
   const [slMode, setSlMode] = useState('pips');
   const [riskPercent, setRiskPercent] = useState(1.0);
-  const [slPips, setSlPips] = useState(15.0);
+  const [slPips, setSlPips] = useState(30.0);
   const [slPriceCustom, setSlPriceCustom] = useState('');
   const [slPercent, setSlPercent] = useState(0.5);
   const [rrRatio, setRrRatio] = useState(1.8);
@@ -50,7 +50,15 @@ export default function OrderForm({
   // Sync initialSymbol when changed from parent
   useEffect(() => {
     if (initialSymbol) {
-      setSymbol(initialSymbol.toUpperCase().trim());
+      const symClean = initialSymbol.toUpperCase().trim();
+      setSymbol(symClean);
+      if (symClean.includes('XAU') || symClean.includes('GOLD')) {
+        setSlPips(45.0);
+      } else if (symClean.includes('BTC')) {
+        setSlPips(150.0);
+      } else {
+        setSlPips(30.0);
+      }
     }
   }, [initialSymbol]);
 
@@ -100,12 +108,13 @@ export default function OrderForm({
     }
 
     // Determine Effective Stop Loss Distance based on slMode ('pips', 'price', 'percent')
-    let effectivePips = 15.0;
-    let distPrice = 15.0 * pipSize;
+    const defaultSymPips = (sym.includes('XAU') || sym.includes('GOLD')) ? 45.0 : (sym.includes('BTC') ? 150.0 : 30.0);
+    let effectivePips = defaultSymPips;
+    let distPrice = defaultSymPips * pipSize;
     let distPercent = (distPrice / currentPrice) * 100;
 
     if (slMode === 'pips') {
-      effectivePips = Math.max(1.0, Number(slPips) || 15.0);
+      effectivePips = Math.max(1.0, Number(slPips) || defaultSymPips);
       distPrice = effectivePips * pipSize;
       distPercent = (distPrice / currentPrice) * 100;
     } else if (slMode === 'price') {
@@ -115,8 +124,8 @@ export default function OrderForm({
         effectivePips = Math.max(1.0, distPrice / pipSize);
         distPercent = (distPrice / currentPrice) * 100;
       } else {
-        effectivePips = 15.0;
-        distPrice = 15.0 * pipSize;
+        effectivePips = defaultSymPips;
+        distPrice = defaultSymPips * pipSize;
         distPercent = (distPrice / currentPrice) * 100;
       }
     } else if (slMode === 'percent') {

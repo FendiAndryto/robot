@@ -8,13 +8,24 @@ const formatCurrency = (val, currency = 'USD') => {
   return `${prefix}$${Math.abs(val).toFixed(2)}`;
 };
 
-export default function JournalTab({ activeTab, closedTradesCount, onNavigateAI }) {
+export default function JournalTab({ activeTab, closedTradesCount, onNavigateAI, bridgeStatus }) {
   const [historyData, setHistoryData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [selectedDate, setSelectedDate] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  const initialDeposit = bridgeStatus?.initial_deposit ?? bridgeStatus?.metrics?.initial_deposit ?? null;
+  const isDepositOverridden = bridgeStatus?.is_deposit_overridden ?? false;
+  const equity = bridgeStatus?.metrics?.equity ?? null;
+  const allTimePnl = bridgeStatus?.all_time_pnl !== undefined && bridgeStatus?.all_time_pnl !== null
+    ? bridgeStatus.all_time_pnl
+    : (equity !== null && initialDeposit !== null ? equity - initialDeposit : null);
+  const allTimePnlPercent = bridgeStatus?.all_time_pnl_percent !== undefined && bridgeStatus?.all_time_pnl_percent !== null
+    ? bridgeStatus.all_time_pnl_percent
+    : (initialDeposit > 0 && allTimePnl !== null ? (allTimePnl / initialDeposit) * 100 : null);
+
 
   const fetchHistory = async (isManual = false) => {
     if (isManual) setRefreshing(true);
@@ -147,12 +158,23 @@ export default function JournalTab({ activeTab, closedTradesCount, onNavigateAI 
       </div>
 
       {/* Real KPIs Grid */}
-      <div className="grid kpis">
+      <div className="grid kpis" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
         <div className="card" id="journal-kpi-net-pnl">
           <div className={`metric ${netPnl >= 0 ? 'positive' : 'negative'}`}>
             {formatCurrency(netPnl)}
           </div>
-          <div className="label">Realized Net P/L · Real MT5</div>
+          <div className="label">Realized Closed P/L</div>
+        </div>
+        <div className="card" id="journal-kpi-deposit-return">
+          <div className={`metric ${(allTimePnl ?? netPnl) >= 0 ? 'positive' : 'negative'}`}>
+            {allTimePnl !== null ? `${allTimePnl >= 0 ? '+' : '−'}$${Math.abs(allTimePnl).toFixed(2)}` : formatCurrency(netPnl)}
+          </div>
+          <div className="label">
+            All-Time Growth {allTimePnlPercent !== null ? `(${allTimePnlPercent >= 0 ? '+' : ''}${allTimePnlPercent.toFixed(1)}%)` : ''}
+          </div>
+          <div className="tiny" style={{ color: 'var(--muted)', marginTop: '2px', fontSize: '9.5px' }}>
+            {initialDeposit ? `Deposit: $${initialDeposit.toFixed(2)} ${isDepositOverridden ? '(Manual)' : '(MT5)'}` : 'Baseline deposit MT5'}
+          </div>
         </div>
         <div className="card" id="journal-kpi-win-rate">
           <div className="metric">{winRate.toFixed(1)}%</div>
@@ -167,6 +189,7 @@ export default function JournalTab({ activeTab, closedTradesCount, onNavigateAI 
           <div className="label">Total Closed Deals</div>
         </div>
       </div>
+
 
       {/* Filter Tabs */}
       <div style={{ display: 'flex', gap: '7px', overflowX: 'auto', padding: '4px 0 12px' }}>

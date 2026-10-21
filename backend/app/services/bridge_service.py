@@ -1,6 +1,9 @@
+import os
+import json
 import time
 import uuid
 import threading
+from datetime import datetime, timezone
 from typing import Optional, List, Dict
 from fastapi import HTTPException, status
 from app.models.bridge import (
@@ -16,13 +19,20 @@ from app.models.bridge import (
     TradeHistoryResponse,
     EquityPointItem,
     EquityCurveResponse,
+    InitialDepositRequest,
+    InitialDepositResponse,
 )
 from app.core.config import settings
 
+ACCOUNT_SETTINGS_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "account_settings.json"
+)
+
 
 class BridgeService:
-    def __init__(self):
+    def __init__(self, settings_file: str = ACCOUNT_SETTINGS_FILE):
         self._lock = threading.Lock()
+        self._settings_file = settings_file
         self._latest_payload: Optional[HeartbeatPayload] = None
         self._last_received_time: Optional[float] = None
         self._pending_commands: List[CommandItem] = []
@@ -36,6 +46,39 @@ class BridgeService:
         self._closed_trades_map: Dict[int, ClosedTradeItem] = {}
         self._equity_snapshots: List[dict] = []
         self._chart_symbol: Optional[str] = None
+        self._mt5_initial_deposit: Optional[float] = None
+        self._custom_initial_deposit: Optional[float] = None
+        self._load_settings()
+
+    def _load_settings(self):
+        if os.path.exists(self._settings_file):
+            try:
+                with open(self._settings_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    val = data.get("custom_initial_deposit")
+                    if val is not None and float(val) > 0:
+                        self._custom_initial_deposit = float(val)
+            except Exception:
+                pass
+
+    def _save_settings(self):
+        dir_name = os.path.dirname(self._settings_file)
+        if dir_name and not os.path.exists(dir_name):
+            try:
+                os.makedirs(dir_name, exist_ok=True)
+            except Exception:
+                pass
+        tmp_file = f"{self._settings_file}.tmp"
+        try:
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump({"custom_initial_deposit": self._custom_initial_deposit}, f, indent=2)
+            os.replace(tmp_file, self._settings_file)
+        except Exception:
+            if os.path.exists(tmp_file):
+                try:
+                    os.remove(tmp_file)
+                except OSError:
+                    pass
 
     def reset_state(self):
         """Reset internal state (primarily used for test isolation)."""
@@ -48,6 +91,14 @@ class BridgeService:
             self._kill_switch_time = None
             self._kill_switch_user = None
             self._previous_positions_map.clear()
+            self._previous_balance = None
+            self._market_quotes.clear()
+            self._closed_trades_map.clear()
+            self._equity_snapshots.clear()
+            self._chart_symbol = None
+            self._mt5_initial_deposit = None
+            self._custom_initial_deposit = None
+
             self._previous_balance = None
             self._market_quotes.clear()
             self._closed_trades_map.clear()
@@ -142,6 +193,9 @@ class BridgeService:
             if payload.closed_trades:
                 for t in payload.closed_trades:
                     self._closed_trades_map[t.ticket] = t
+
+            if payload.initial_deposit and payload.initial_deposit > 0:
+                self._mt5_initial_deposit = payload.initial_deposit
 
             if payload.chart_symbol:
                 self._chart_symbol = payload.chart_symbol.strip()
@@ -397,19 +451,121 @@ class BridgeService:
                 gross_loss=gross_loss
             )
 
-    def get_equity_curve(self) -> EquityCurveResponse:
+    def get_effective_initial_deposit(self) -> Optional[float]:
+        if self._custom_initial_deposit is not None and self._custom_initial_deposit > 0:
+            return self._custom_initial_deposit
+        if self._mt5_initial_deposit is not None and self._mt5_initial_deposit > 0:
+            return self._mt5_initial_deposit
+        if self._latest_payload and self._latest_payload.balance > 0:
+            return self._latest_payload.balance
+        return None
+
+    def get_initial_deposit_info(self) -> dict:
         with self._lock:
-            points = [
-                EquityPointItem(timestamp=s["timestamp"], equity=s["equity"], balance=s["balance"])
-                for s in self._equity_snapshots
+            eff_deposit = self.get_effective_initial_deposit()
+            bal = self._latest_payload.balance if self._latest_payload else (eff_deposit or 0.0)
+            eq = self._latest_payload.equity if self._latest_payload else (eff_deposit or 0.0)
+            settled_pnl = round(bal - eff_deposit, 2) if eff_deposit else 0.0
+            settled_pnl_pct = round((settled_pnl / eff_deposit) * 100.0, 2) if eff_deposit else 0.0
+            all_time_pnl = round(eq - eff_deposit, 2) if eff_deposit else 0.0
+            all_time_pnl_pct = round((all_time_pnl / eff_deposit) * 100.0, 2) if eff_deposit else 0.0
+
+            source = "override" if self._custom_initial_deposit is not None else ("mt5" if self._mt5_initial_deposit else "default")
+            return {
+                "status": "success",
+                "initial_deposit": eff_deposit,
+                "is_overridden": self._custom_initial_deposit is not None,
+                "source": source,
+                "settled_pnl": settled_pnl,
+                "settled_pnl_percent": settled_pnl_pct,
+                "all_time_pnl": all_time_pnl,
+                "all_time_pnl_percent": all_time_pnl_pct,
+                "message": "Initial deposit retrieved successfully."
+            }
+
+    def set_initial_deposit_override(self, initial_deposit: Optional[float]) -> dict:
+        with self._lock:
+            if initial_deposit is not None and float(initial_deposit) > 0:
+                self._custom_initial_deposit = round(float(initial_deposit), 2)
+            else:
+                self._custom_initial_deposit = None
+            self._save_settings()
+
+        return self.get_initial_deposit_info()
+
+    def get_equity_curve(self, time_range: str = "1M") -> EquityCurveResponse:
+        current_time = time.time()
+        rng = (time_range or "1M").strip().upper()
+
+        with self._lock:
+            cur_bal = self._latest_payload.balance if self._latest_payload else 0.0
+            cur_eq = self._latest_payload.equity if self._latest_payload else cur_bal
+            eff_deposit = self.get_effective_initial_deposit() or cur_bal
+
+            # Calculate timeframe window start
+            if rng in ("DAY", "1D", "D"):
+                now_utc = datetime.now(timezone.utc)
+                start_ts = int(datetime(now_utc.year, now_utc.month, now_utc.day, tzinfo=timezone.utc).timestamp())
+            elif rng in ("WEEK", "1W", "W"):
+                start_ts = int(current_time - (7 * 86400))
+            elif rng in ("MONTH", "1M", "M"):
+                start_ts = int(current_time - (30 * 86400))
+            else:
+                start_ts = 0
+
+            # Filter closed trades within window and sort chronologically
+            trades_in_window = [
+                t for t in self._closed_trades_map.values()
+                if (t.close_time or 0) >= start_ts
             ]
-            current_eq = self._latest_payload.equity if self._latest_payload else 0.0
-            starting_eq = points[0].equity if points else current_eq
-            peak_eq = max([p.equity for p in points], default=current_eq)
+            trades_in_window.sort(key=lambda x: x.close_time or 0)
+
+            total_profit_in_window = sum(t.profit for t in trades_in_window)
+            starting_bal_window = round(cur_bal - total_profit_in_window, 2)
+            if starting_bal_window <= 0 and eff_deposit > 0:
+                starting_bal_window = eff_deposit
+
+            points: List[EquityPointItem] = []
+
+            # 1. Baseline start point of period
+            p0_time = start_ts if start_ts > 0 else (trades_in_window[0].close_time if trades_in_window else int(current_time))
+            points.append(EquityPointItem(
+                timestamp=p0_time,
+                balance=starting_bal_window,
+                equity=starting_bal_window
+            ))
+
+            # 2. Chronological progression for each closed deal
+            running_bal = starting_bal_window
+            for t in trades_in_window:
+                running_bal = round(running_bal + t.profit, 2)
+                points.append(EquityPointItem(
+                    timestamp=t.close_time,
+                    balance=running_bal,
+                    equity=running_bal
+                ))
+
+            # 3. Live terminal point right now
+            points.append(EquityPointItem(
+                timestamp=int(current_time),
+                balance=cur_bal,
+                equity=cur_eq
+            ))
+
+            equities = [p.equity for p in points]
+            peak_eq = max(equities) if equities else cur_eq
+            starting_eq = points[0].equity if points else cur_eq
+
+            all_time_pnl = round(cur_eq - eff_deposit, 2) if eff_deposit else 0.0
+            roi_percent = round((all_time_pnl / eff_deposit) * 100.0, 2) if eff_deposit else 0.0
+
             return EquityCurveResponse(
                 starting_equity=starting_eq,
-                current_equity=current_eq,
+                initial_deposit=eff_deposit,
+                current_equity=cur_eq,
                 peak_equity=peak_eq,
+                all_time_pnl=all_time_pnl,
+                roi_percent=roi_percent,
                 points=points
             )
 
@@ -417,6 +573,8 @@ class BridgeService:
         current_time = time.time()
         with self._lock:
             pending_count = len(self._pending_commands)
+            eff_deposit = self.get_effective_initial_deposit()
+            is_overridden = (self._custom_initial_deposit is not None and self._custom_initial_deposit > 0)
             
             if self._last_received_time is None or self._latest_payload is None:
                 return BridgeStatusResponse(
@@ -425,6 +583,12 @@ class BridgeService:
                     last_heartbeat_at=None,
                     seconds_since_last_heartbeat=None,
                     metrics=None,
+                    initial_deposit=eff_deposit,
+                    is_deposit_overridden=is_overridden,
+                    settled_pnl=0.0,
+                    settled_pnl_percent=0.0,
+                    all_time_pnl=0.0,
+                    all_time_pnl_percent=0.0,
                     positions=[],
                     market_quotes=list(self._market_quotes.values()),
                     chart_symbol=self._chart_symbol,
@@ -439,12 +603,25 @@ class BridgeService:
             is_active = (diff <= settings.HEARTBEAT_TIMEOUT_SECONDS)
             positions = list(self._latest_payload.positions) if is_active else []
             
+            bal = self._latest_payload.balance
+            eq = self._latest_payload.equity
+            settled_pnl = round(bal - eff_deposit, 2) if eff_deposit else 0.0
+            settled_pnl_pct = round((settled_pnl / eff_deposit) * 100.0, 2) if eff_deposit else 0.0
+            all_time_pnl = round(eq - eff_deposit, 2) if eff_deposit else 0.0
+            all_time_pnl_pct = round((all_time_pnl / eff_deposit) * 100.0, 2) if eff_deposit else 0.0
+
             return BridgeStatusResponse(
                 is_connected=is_active,
                 terminal_connected=self._latest_payload.terminal_connected if is_active else False,
                 last_heartbeat_at=int(self._last_received_time),
                 seconds_since_last_heartbeat=round(diff, 2),
                 metrics=self._latest_payload,
+                initial_deposit=eff_deposit,
+                is_deposit_overridden=is_overridden,
+                settled_pnl=settled_pnl,
+                settled_pnl_percent=settled_pnl_pct,
+                all_time_pnl=all_time_pnl,
+                all_time_pnl_percent=all_time_pnl_pct,
                 positions=positions,
                 market_quotes=list(self._market_quotes.values()),
                 chart_symbol=self._chart_symbol,
@@ -457,3 +634,4 @@ class BridgeService:
 
 
 bridge_service = BridgeService()
+

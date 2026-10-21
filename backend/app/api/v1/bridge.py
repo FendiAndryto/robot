@@ -11,6 +11,8 @@ from app.models.bridge import (
     MarketQuoteItem,
     TradeHistoryResponse,
     EquityCurveResponse,
+    InitialDepositRequest,
+    InitialDepositResponse,
 )
 from app.services.bridge_service import bridge_service
 from app.core.deps import get_current_user
@@ -39,6 +41,29 @@ async def get_bridge_status():
 
 
 @router.get(
+    "/initial-deposit",
+    response_model=InitialDepositResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get initial deposit baseline settings and all-time P/L return"
+)
+async def get_initial_deposit():
+    return bridge_service.get_initial_deposit_info()
+
+
+@router.post(
+    "/initial-deposit",
+    response_model=InitialDepositResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Set or override manual initial deposit baseline (or null/0 to reset to MT5)"
+)
+async def set_initial_deposit(
+    req: InitialDepositRequest,
+    current_user: str = Depends(get_current_user)
+):
+    return bridge_service.set_initial_deposit_override(req.initial_deposit)
+
+
+@router.get(
     "/history",
     response_model=TradeHistoryResponse,
     status_code=status.HTTP_200_OK,
@@ -64,8 +89,8 @@ async def get_market_quotes():
     status_code=status.HTTP_200_OK,
     summary="Retrieve equity snapshots over time for dynamic performance chart"
 )
-async def get_equity_curve():
-    return bridge_service.get_equity_curve()
+async def get_equity_curve(range: str = "1M"):
+    return bridge_service.get_equity_curve(time_range=range)
 
 
 @router.post(

@@ -164,8 +164,8 @@ export const api = {
     return res.json();
   },
 
-  async getEquityCurve() {
-    const res = await authFetch(`${API_BASE}/api/v1/bridge/equity-curve`, {
+  async getEquityCurve(range = '1M') {
+    const res = await authFetch(`${API_BASE}/api/v1/bridge/equity-curve?range=${encodeURIComponent(range)}`, {
       method: 'GET'
     });
     if (!res.ok) {
@@ -173,6 +173,31 @@ export const api = {
     }
     return res.json();
   },
+
+  async getInitialDeposit() {
+    const res = await authFetch(`${API_BASE}/api/v1/bridge/initial-deposit`, {
+      method: 'GET'
+    });
+    if (!res.ok) {
+      throw new Error('Failed to fetch initial deposit');
+    }
+    return res.json();
+  },
+
+  async setInitialDeposit(amount) {
+    const res = await authFetch(`${API_BASE}/api/v1/bridge/initial-deposit`, {
+      method: 'POST',
+      body: JSON.stringify({
+        initial_deposit: amount !== null && amount !== undefined && amount !== '' ? Number(amount) : null
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to update initial deposit' }));
+      throw new Error(err.detail || 'Initial deposit update failed');
+    }
+    return res.json();
+  },
+
 
   // Trade Execution
   async submitOrder(orderData) {

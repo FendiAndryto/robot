@@ -67,8 +67,11 @@ class EquityPointItem(BaseModel):
 
 class EquityCurveResponse(BaseModel):
     starting_equity: float = 0.0
+    initial_deposit: Optional[float] = None
     current_equity: float = 0.0
     peak_equity: float = 0.0
+    all_time_pnl: Optional[float] = None
+    roi_percent: Optional[float] = None
     points: List[EquityPointItem] = Field(default_factory=list)
 
 
@@ -78,6 +81,7 @@ class HeartbeatPayload(BaseModel):
     currency: str = Field("USD", description="Account Base Currency")
     balance: float = Field(..., description="Current Account Balance")
     equity: float = Field(..., description="Current Account Equity")
+    initial_deposit: Optional[float] = Field(None, description="Initial funding deposit from MT5 deal history")
     margin: float = Field(0.0, description="Current Margin")
     free_margin: float = Field(0.0, description="Current Free Margin")
     margin_level: float = Field(0.0, description="Current Margin Level Percentage")
@@ -126,12 +130,34 @@ class HeartbeatResponse(BaseModel):
     commands: List[CommandItem] = []
 
 
+class InitialDepositRequest(BaseModel):
+    initial_deposit: Optional[float] = Field(None, description="Custom deposit baseline amount, or null/0 to reset to auto MT5")
+
+
+class InitialDepositResponse(BaseModel):
+    status: str = "success"
+    initial_deposit: Optional[float] = None
+    is_overridden: bool = False
+    source: str = "mt5"
+    settled_pnl: Optional[float] = None
+    settled_pnl_percent: Optional[float] = None
+    all_time_pnl: Optional[float] = None
+    all_time_pnl_percent: Optional[float] = None
+    message: str = "Initial deposit setting updated."
+
+
 class BridgeStatusResponse(BaseModel):
     is_connected: bool
     terminal_connected: bool = False
     last_heartbeat_at: Optional[int] = None
     seconds_since_last_heartbeat: Optional[float] = None
     metrics: Optional[HeartbeatPayload] = None
+    initial_deposit: Optional[float] = None
+    is_deposit_overridden: bool = False
+    settled_pnl: Optional[float] = None
+    settled_pnl_percent: Optional[float] = None
+    all_time_pnl: Optional[float] = None
+    all_time_pnl_percent: Optional[float] = None
     positions: List[PositionItem] = []
     market_quotes: List[MarketQuoteItem] = []
     chart_symbol: Optional[str] = None
@@ -140,3 +166,4 @@ class BridgeStatusResponse(BaseModel):
     is_kill_switch_active: bool = False
     kill_switch_reason: Optional[str] = None
     kill_switch_time: Optional[int] = None
+
