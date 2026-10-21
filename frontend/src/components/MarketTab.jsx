@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, BarChart2, Eye, Compass, RefreshCw, Zap } from 'lucide-react';
+import { TrendingUp, BarChart2, Eye, Compass, RefreshCw } from 'lucide-react';
 import { api } from '../services/api';
 
 const getSymbolIcon = (sym) => {
@@ -296,19 +296,6 @@ export default function MarketTab({ bridgeStatus }) {
               </b>
             </div>
           </div>
-
-          {onOpenOrder && (
-            <button
-              type="button"
-              className="btn"
-              style={{ marginTop: '16px', width: '100%', justifyContent: 'center' }}
-              onClick={() => onOpenOrder(activeQuote.symbol)}
-              id="market-trade-symbol-btn"
-            >
-              <Zap size={14} />
-              <span>Eksekusi Order {activeQuote.symbol}</span>
-            </button>
-          )}
         </div>
       </div>
 

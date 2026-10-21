@@ -11,7 +11,7 @@ import {
   Sparkles,
   ShieldCheck
 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, setToken } from '../services/api';
 
 export default function LoginPage({ onLoginSuccess, sessionExpiredMsg }) {
   const [activeTab, setActiveTab] = useState('login'); // 'login' | 'register'
@@ -419,7 +419,7 @@ export default function LoginPage({ onLoginSuccess, sessionExpiredMsg }) {
                   type="button"
                   className="btn alt"
                   style={{ padding: '4px 8px', fontSize: '10px' }}
-                  onClick={() => handleQuickDemo('admin', 'admin')}
+                  onClick={() => handleQuickDemo('admin', 'change_this_password')}
                   id="quick-demo-admin-btn"
                 >
                   <Sparkles size={11} />
