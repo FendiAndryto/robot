@@ -74,23 +74,14 @@ export default function SignalsPanel({
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <h3 style={{ fontSize: '1.05rem', fontWeight: 700 }}>Strategy Recommendations</h3>
-              {isAutoPilotActive ? (
-                <span className="live-pill autopilot" id="signals-mode-pill" style={{ background: 'rgba(16, 185, 129, 0.15)', borderColor: 'rgba(16, 185, 129, 0.4)', color: '#34d399' }}>
-                  <Zap size={11} style={{ display: 'inline', marginRight: '3px', verticalAlign: '-1px' }} />
-                  AUTOPILOT ON
-                </span>
-              ) : (
-                <span className="live-pill" id="signals-mode-pill">
-                  <span className="pulse-dot online" style={{ width: '6px', height: '6px' }} />
-                  SEMI-AUTO
-                </span>
-              )}
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 700 }}>AI Market Intelligence</h3>
+              <span className="live-pill" id="signals-mode-pill" style={{ background: 'rgba(59, 130, 246, 0.15)', borderColor: 'rgba(59, 130, 246, 0.4)', color: '#60a5fa' }}>
+                <Zap size={11} style={{ display: 'inline', marginRight: '3px', verticalAlign: '-1px' }} />
+                GLOBAL RADAR
+              </span>
             </div>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              {isAutoPilotActive
-                ? 'Confluence signals are automatically executed to MT5 terminal'
-                : 'EMA Trend & RSI Momentum Confluence Monitor'}
+              Real-time Confluence Signals • Lot auto-adjusted for your live equity
             </span>
           </div>
         </div>

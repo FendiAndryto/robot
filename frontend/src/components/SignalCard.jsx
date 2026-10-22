@@ -10,7 +10,8 @@ import {
   Target,
   Loader2,
   Clock,
-  Lock
+  Lock,
+  Bot
 } from 'lucide-react';
 
 export default function SignalCard({
@@ -126,15 +127,20 @@ export default function SignalCard({
         <div className="signal-reason-text">{signal.reason}</div>
       </div>
 
-      {/* Action Buttons */}
-      <div className="signal-actions">
+      {/* Action / Execution Status */}
+      <div className="signal-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+          <Bot size={15} style={{ color: 'var(--accent-cyan)' }} />
+          <span>Executed by <strong>TradeGear Robot</strong> on MT5</span>
+        </div>
+
         <button
           type="button"
           className="btn-signal-dismiss"
           onClick={handleDismiss}
           disabled={loadingAction !== null}
           id={`dismiss-signal-${signal.signal_id}`}
-          title="Ignore / Dismiss this setup"
+          title="Dismiss this setup from radar"
         >
           {loadingAction === 'DISMISS' ? (
             <Loader2 size={14} className="animate-spin" />
@@ -142,32 +148,6 @@ export default function SignalCard({
             <X size={14} />
           )}
           <span>Dismiss</span>
-        </button>
-
-        <button
-          type="button"
-          className={`btn-signal-approve ${isKillSwitchActive ? 'disabled' : ''}`}
-          onClick={handleApprove}
-          disabled={isKillSwitchActive || loadingAction !== null}
-          id={`approve-signal-${signal.signal_id}`}
-          title={isKillSwitchActive ? 'Trading locked by Kill Switch' : 'Approve and dispatch order to MT5'}
-        >
-          {loadingAction === 'APPROVE' ? (
-            <>
-              <Loader2 size={15} className="animate-spin" />
-              <span>Executing Order...</span>
-            </>
-          ) : isKillSwitchActive ? (
-            <>
-              <Lock size={15} />
-              <span>Trading Locked</span>
-            </>
-          ) : (
-            <>
-              <Check size={16} />
-              <span>Approve & Execute</span>
-            </>
-          )}
         </button>
       </div>
     </div>

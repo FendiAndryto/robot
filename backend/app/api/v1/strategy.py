@@ -21,9 +21,35 @@ router = APIRouter(prefix="/strategy", tags=["Strategy & Signals"])
     summary="List active or historic trading signals detected by the strategy engine"
 )
 async def get_signals(
-    include_all: bool = Query(False, alias="all", description="Include non-pending signals (approved, dismissed, expired)")
+    include_all: bool = Query(False, alias="all", description="Include non-pending signals (approved, dismissed, expired)"),
+    current_user: Optional[str] = Depends(get_optional_current_user)
 ):
-    return strategy_engine.get_signals(include_all=include_all)
+    signals = strategy_engine.get_signals(include_all=include_all)
+    if current_user:
+        live_equity = bridge_service.get_equity(username=current_user)
+        if live_equity and live_equity > 0:
+            from app.models.risk import LotCalculationRequest
+            from app.services.risk_service import risk_service
+            from app.core.config import settings
+
+            personalized_signals = []
+            for s in signals:
+                s_dict = s.model_dump() if hasattr(s, "model_dump") else s.dict()
+                lot_calc = risk_service.calculate_lot(
+                    LotCalculationRequest(
+                        symbol=s.symbol,
+                        stop_loss_pips=s.sl_pips,
+                        risk_percent=settings.DEFAULT_RISK_PER_TRADE_PERCENT,
+                        equity=live_equity,
+                        market_price=s.entry_price
+                    ),
+                    live_equity=live_equity
+                )
+                s_dict["recommended_lot"] = lot_calc.calculated_lot
+                s_dict["risk_amount"] = lot_calc.risk_amount
+                personalized_signals.append(SignalItem(**s_dict))
+            return personalized_signals
+    return signals
 
 
 @router.post(
