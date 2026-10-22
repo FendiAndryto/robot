@@ -5,51 +5,53 @@
 //+------------------------------------------------------------------+
 #property copyright   "Copyright 2026, TradeGear"
 #property link        "https://tradegear.my.id"
-#property version     "1.01"
-#property description "TradeGear Standalone Confluence Trading Robot EA v1.01"
-#property description "Trend: EMA 20/50 | Momentum: RSI 14 | Auto Spread Adaptation & Protection"
+#property version     "1.05"
+#property description "TradeGear Autonomous Confluence Trading Robot EA v1.05"
+#property description "Trend: EMA 20/50 | Pullback Retest Filter | Anti-Choke Golden Profit Lock & BEP | 1:2 R:R"
 
 #include <Trade\Trade.mqh>
 
 //--- Input Parameters
 input group "--- Strategy Parameters ---"
-input int             InpFastEMAPeriod     = 20;       // Fast EMA Period
-input int             InpSlowEMAPeriod     = 50;       // Slow EMA Period
-input int             InpRSIPeriod         = 14;       // RSI Period
-input double          InpRSIOversold       = 30.0;     // RSI Oversold Level
-input double          InpRSIOverbought     = 70.0;     // RSI Overbought Level
-input double          InpRSIBullishMin     = 45.0;     // RSI Bullish Confirmation Min
-input double          InpRSIBullishMax     = 65.0;     // RSI Bullish Confirmation Max
-input double          InpRSIBearishMin     = 35.0;     // RSI Bearish Confirmation Min
-input double          InpRSIBearishMax     = 55.0;     // RSI Bearish Confirmation Max
+input int             InpFastEMAPeriod         = 20;       // Fast EMA Period
+input int             InpSlowEMAPeriod         = 50;       // Slow EMA Period
+input int             InpRSIPeriod             = 14;       // RSI Period
+input double          InpRSIBullishMin         = 46.0;     // RSI Bullish Confirmation Min
+input double          InpRSIBullishMax         = 62.0;     // RSI Bullish Confirmation Max
+input double          InpRSIBearishMin         = 38.0;     // RSI Bearish Confirmation Min
+input double          InpRSIBearishMax         = 54.0;     // RSI Bearish Confirmation Max
+input bool            InpRequirePullback       = true;     // Require Candle Retest Near EMA (Anti-Chasing)
 
 input group "--- Risk & Position Sizing ---"
-input bool            InpUseDynamicRisk    = true;     // Use % Equity Risk Sizing
-input double          InpRiskPercent       = 1.0;      // Risk Per Trade (% of Equity)
-input double          InpFixedLot          = 0.01;     // Fixed Lot (if Dynamic Risk = false)
-input double          InpStopLossPips      = 25.0;     // Default Stop Loss in Pips
-input double          InpTakeProfitPips    = 50.0;     // Default Take Profit in Pips (1:2 R:R)
-input double          InpMaxSpreadPoints   = 350.0;    // Max Spread in Points (Gold: 350, FX: 40)
+input bool            InpUseDynamicRisk        = false;    // Use % Equity Risk Sizing (Default: false -> Lot 0.01)
+input double          InpRiskPercent           = 1.0;      // Risk Per Trade (% of Equity)
+input double          InpFixedLot              = 0.01;     // Fixed Lot Size (Default: 0.01 lot)
+input double          InpStopLossPips          = 40.0;     // Stop Loss in Pips (Default: 40 pips, Gold: 45 pips)
+input double          InpTakeProfitPips        = 80.0;     // Take Profit in Pips (1:2 Ratio -> 80 pips)
+input double          InpMaxSpreadPoints       = 350.0;    // Max Spread in Points (Gold: 350, FX: 45)
 
-input group "--- Trade Protection (BEP & Trailing) ---"
-input bool            InpEnableBEP         = true;     // Enable Auto-Breakeven Protection
-input int             InpBEPTriggerPips    = 18;       // Profit in Pips to Trigger BEP
-input int             InpBEPBufferPips     = 2;        // Buffer Pips above Entry for BEP
-input bool            InpEnableTrailing    = false;    // Enable Trailing Stop
-input int             InpTrailingDistPips  = 20;       // Trailing Distance in Pips
-input int             InpTrailingStepPips  = 5;        // Trailing Step in Pips
+input group "--- Advanced Trade Protection (Anti-Choke & Profit Lock) ---"
+input bool            InpEnableBEP             = true;     // Enable Auto-Breakeven Protection (BEP)
+input int             InpBEPTriggerPips        = 35;       // Profit in Pips to Trigger BEP (e.g. 35 pips)
+input int             InpBEPBufferPips         = 4;        // Buffer Pips above Entry for BEP (4 pips safe buffer)
+input bool            InpEnableProfitLock      = true;     // Enable Golden Profit Lock (Locks profit when near TP)
+input int             InpProfitLockTriggerPips = 60;       // Profit in Pips to Lock Gain (60 pips = ~75% to TP)
+input int             InpProfitLockGainPips    = 30;       // Pips Locked In (Guarantees +30 pips if price reverses)
+input bool            InpEnableTrailing        = true;     // Enable Dynamic Trailing Stop
+input int             InpTrailingDistPips      = 25;       // Trailing Distance in Pips
+input int             InpTrailingStepPips      = 5;        // Trailing Step in Pips
 
 input group "--- Execution Settings ---"
-input ulong           InpMagicNumber       = 778899;   // Magic Number
-input ulong           InpSlippagePoints    = 10;       // Max Slippage in Points
-input string          InpOrderComment      = "TG-Robot"; // Order Comment
+input ulong           InpMagicNumber           = 778899;   // Magic Number
+input ulong           InpSlippagePoints        = 15;       // Max Slippage in Points
+input string          InpOrderComment          = "TG-Robot"; // Order Comment
 
 //--- Global Variables
 CTrade                g_trade;
-int                   g_handleFastEMA      = INVALID_HANDLE;
-int                   g_handleSlowEMA      = INVALID_HANDLE;
-int                   g_handleRSI          = INVALID_HANDLE;
-datetime              g_lastBarTime        = 0;
+int                   g_handleFastEMA          = INVALID_HANDLE;
+int                   g_handleSlowEMA          = INVALID_HANDLE;
+int                   g_handleRSI              = INVALID_HANDLE;
+datetime              g_lastBarTime            = 0;
 
 //+------------------------------------------------------------------+
 //| Calculate Points Per Pip for symbol                              |
@@ -95,6 +97,33 @@ double GetMaxSpreadLimit(string sym)
 }
 
 //+------------------------------------------------------------------+
+//| Get Adaptive Stop Loss Pips for symbol (Anti-Choke minimums)     |
+//+------------------------------------------------------------------+
+double GetAdaptiveSLPips(string sym)
+{
+   string upper = sym;
+   StringToUpper(upper);
+   if(StringFind(upper, "XAU") >= 0 || StringFind(upper, "GOLD") >= 0)
+   {
+      // Gold safe default SL: min 45 pips ($4.50)
+      return (InpStopLossPips >= 40.0 ? InpStopLossPips : 45.0);
+   }
+   if(StringFind(upper, "BTC") >= 0)
+   {
+      return (InpStopLossPips >= 100.0 ? InpStopLossPips : 200.0);
+   }
+   return (InpStopLossPips >= 30.0 ? InpStopLossPips : 35.0);
+}
+
+//+------------------------------------------------------------------+
+//| Get Adaptive Take Profit Pips for symbol (Strict 1:2 R:R Ratio)  |
+//+------------------------------------------------------------------+
+double GetAdaptiveTPPips(string sym)
+{
+   return GetAdaptiveSLPips(sym) * 2.0; // Strictly 1:2 R:R (e.g. 40 pip SL -> 80 pip TP)
+}
+
+//+------------------------------------------------------------------+
 //| Calculate Dynamic Lot Size based on % Risk and Stop Loss Pips    |
 //+------------------------------------------------------------------+
 double CalculateLotSize(string sym, double slPips, double riskPct)
@@ -106,7 +135,7 @@ double CalculateLotSize(string sym, double slPips, double riskPct)
 
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    if(equity <= 0.0) equity = AccountInfoDouble(ACCOUNT_BALANCE);
-   if(equity <= 0.0) return 0.01;
+   if(equity <= 0.0) return InpFixedLot;
 
    double riskAmount = equity * (riskPct / 100.0);
    double tickSize = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
@@ -115,11 +144,11 @@ double CalculateLotSize(string sym, double slPips, double riskPct)
    int pointsPerPip = GetPointsPerPip(sym);
 
    if(point <= 0.0 || tickSize <= 0.0 || tickValue <= 0.0)
-      return 0.01;
+      return InpFixedLot;
 
    double slPoints = slPips * (double)pointsPerPip;
    double lossPerLot = (slPoints * point / tickSize) * tickValue;
-   if(lossPerLot <= 0.0) return 0.01;
+   if(lossPerLot <= 0.0) return InpFixedLot;
 
    double calculatedLot = riskAmount / lossPerLot;
 
@@ -151,7 +180,7 @@ void SetSafeFillingType(string sym)
 }
 
 //+------------------------------------------------------------------+
-//| Count Active Positions for this EA on Current Symbol             |
+//| Count Open Positions for this EA on this Symbol                  |
 //+------------------------------------------------------------------+
 int CountOpenPositions(string sym, ulong magic)
 {
@@ -160,32 +189,32 @@ int CountOpenPositions(string sym, ulong magic)
    for(int i = 0; i < total; i++)
    {
       ulong ticket = PositionGetTicket(i);
-      if(ticket > 0)
+      if(ticket <= 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) == sym && PositionGetInteger(POSITION_MAGIC) == (long)magic)
       {
-         if(PositionGetString(POSITION_SYMBOL) == sym && PositionGetInteger(POSITION_MAGIC) == (long)magic)
-            count++;
+         count++;
       }
    }
    return count;
 }
 
 //+------------------------------------------------------------------+
-//| Position Protection: Auto-Breakeven (BEP) & Trailing Stop        |
+//| Manage Position Protections (BEP, Golden Profit Lock, Trailing)  |
 //+------------------------------------------------------------------+
 void ManagePositionsProtection()
 {
-   if(!InpEnableBEP && !InpEnableTrailing) return;
-
-   string sym = _Symbol;
    int total = PositionsTotal();
+   string sym = _Symbol;
    double point = SymbolInfoDouble(sym, SYMBOL_POINT);
    int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
    int pointsPerPip = GetPointsPerPip(sym);
 
-   double bepTriggerPts = InpBEPTriggerPips * pointsPerPip;
-   double bepBufferPts = InpBEPBufferPips * pointsPerPip;
-   double trailingDistPts = InpTrailingDistPips * pointsPerPip;
-   double trailingStepPts = InpTrailingStepPips * pointsPerPip;
+   double bepTriggerPts      = InpBEPTriggerPips * pointsPerPip;
+   double bepBufferPts       = InpBEPBufferPips * pointsPerPip;
+   double profitLockTrigPts  = InpProfitLockTriggerPips * pointsPerPip;
+   double profitLockGainPts  = InpProfitLockGainPips * pointsPerPip;
+   double trailingDistPts    = InpTrailingDistPips * pointsPerPip;
+   double trailingStepPts    = InpTrailingStepPips * pointsPerPip;
 
    for(int i = total - 1; i >= 0; i--)
    {
@@ -205,19 +234,31 @@ void ManagePositionsProtection()
       {
          double profitPts = (currentPrice - openPrice) / point;
 
-         // Auto-Breakeven
-         if(InpEnableBEP && profitPts >= bepTriggerPts)
+         // Tier 2: Golden Profit Lock (e.g. at 60 pips profit, lock in 30 pips)
+         if(InpEnableProfitLock && profitPts >= profitLockTrigPts)
+         {
+            double lockSL = NormalizeDouble(openPrice + (profitLockGainPts * point), digits);
+            if(lockSL > currentSL + (point * 0.5) || currentSL == 0.0)
+            {
+               ResetLastError();
+               if(g_trade.PositionModify(ticket, lockSL, currentTP))
+                  PrintFormat("[TG-Robot] Tier-2 Profit Lock BUY #%I64u: SL locked at %.5f (+%d pips profit secured!)",
+                              ticket, lockSL, InpProfitLockGainPips);
+            }
+         }
+         // Tier 1: Auto-BEP (e.g. at 35 pips profit, move SL to entry + 4 pips buffer)
+         else if(InpEnableBEP && profitPts >= bepTriggerPts)
          {
             double newSL = NormalizeDouble(openPrice + (bepBufferPts * point), digits);
             if(currentSL < newSL - (point * 0.5) || currentSL == 0.0)
             {
                ResetLastError();
                if(g_trade.PositionModify(ticket, newSL, currentTP))
-                  PrintFormat("[TG-Robot] Auto-BEP BUY #%I64u: SL moved to %.5f", ticket, newSL);
+                  PrintFormat("[TG-Robot] Auto-BEP BUY #%I64u: SL moved to %.5f (Zero-Risk Active)", ticket, newSL);
             }
          }
 
-         // Trailing Stop
+         // Tier 3: Dynamic Trailing Stop (Rides the move when deep in profit)
          if(InpEnableTrailing && profitPts >= trailingDistPts)
          {
             double proposedSL = NormalizeDouble(currentPrice - (trailingDistPts * point), digits);
@@ -233,19 +274,31 @@ void ManagePositionsProtection()
       {
          double profitPts = (openPrice - currentPrice) / point;
 
-         // Auto-Breakeven
-         if(InpEnableBEP && profitPts >= bepTriggerPts)
+         // Tier 2: Golden Profit Lock (e.g. at 60 pips profit, lock in 30 pips)
+         if(InpEnableProfitLock && profitPts >= profitLockTrigPts)
+         {
+            double lockSL = NormalizeDouble(openPrice - (profitLockGainPts * point), digits);
+            if(currentSL == 0.0 || lockSL < currentSL - (point * 0.5))
+            {
+               ResetLastError();
+               if(g_trade.PositionModify(ticket, lockSL, currentTP))
+                  PrintFormat("[TG-Robot] Tier-2 Profit Lock SELL #%I64u: SL locked at %.5f (+%d pips profit secured!)",
+                              ticket, lockSL, InpProfitLockGainPips);
+            }
+         }
+         // Tier 1: Auto-BEP (e.g. at 35 pips profit, move SL to entry - 4 pips buffer)
+         else if(InpEnableBEP && profitPts >= bepTriggerPts)
          {
             double newSL = NormalizeDouble(openPrice - (bepBufferPts * point), digits);
             if(currentSL > newSL + (point * 0.5) || currentSL == 0.0)
             {
                ResetLastError();
                if(g_trade.PositionModify(ticket, newSL, currentTP))
-                  PrintFormat("[TG-Robot] Auto-BEP SELL #%I64u: SL moved to %.5f", ticket, newSL);
+                  PrintFormat("[TG-Robot] Auto-BEP SELL #%I64u: SL moved to %.5f (Zero-Risk Active)", ticket, newSL);
             }
          }
 
-         // Trailing Stop
+         // Tier 3: Dynamic Trailing Stop (Rides the move when deep in profit)
          if(InpEnableTrailing && profitPts >= trailingDistPts)
          {
             double proposedSL = NormalizeDouble(currentPrice + (trailingDistPts * point), digits);
@@ -267,7 +320,10 @@ void UpdateChartHUD(double fastEMA, double slowEMA, double rsi, string signalSta
 {
    double maxSpreadAllowed = GetMaxSpreadLimit(_Symbol);
    int curSpread = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   
+   double slPips = GetAdaptiveSLPips(_Symbol);
+   double tpPips = GetAdaptiveTPPips(_Symbol);
+   double lot = InpUseDynamicRisk ? CalculateLotSize(_Symbol, slPips, InpRiskPercent) : InpFixedLot;
+
    bool termTrade = (bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
    bool eaTrade   = (bool)MQLInfoInteger(MQL_TRADE_ALLOWED);
    bool acctTrade = (bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED);
@@ -277,13 +333,15 @@ void UpdateChartHUD(double fastEMA, double slowEMA, double rsi, string signalSta
    else if(fastEMA < slowEMA && slowEMA > 0) bias = "BEARISH (DOWNTREND)";
 
    string hud = "=================================================\n";
-   hud += "  TRADEGEAR CONFLUENCE ROBOT (AUTONOMOUS EA) v1.02\n";
+   hud += "  TRADEGEAR CONFLUENCE ROBOT (AUTONOMOUS EA) v1.05\n";
    hud += "=================================================\n";
    hud += StringFormat(" Symbol: %s | Timeframe: %s | Magic: %I64u\n", _Symbol, EnumToString(_Period), InpMagicNumber);
    hud += StringFormat(" Fast EMA (%d): %.5f | Slow EMA (%d): %.5f\n", InpFastEMAPeriod, fastEMA, InpSlowEMAPeriod, slowEMA);
    hud += StringFormat(" RSI (%d): %.2f | Market Bias: %s\n", InpRSIPeriod, rsi, bias);
    hud += StringFormat(" Spread: %d pts (Limit: %d pts) | Open Pos: %d\n", curSpread, (int)maxSpreadAllowed, CountOpenPositions(_Symbol, InpMagicNumber));
-   hud += StringFormat(" Risk Lot: %.1f%% Equity\n", InpRiskPercent);
+   hud += StringFormat(" Strategy Targets: SL %.0f pips | TP %.0f pips (1:2 R:R)\n", slPips, tpPips);
+   hud += StringFormat(" Protection: BEP @ +%dp | Profit Lock @ +%dp (+%dp)\n", InpBEPTriggerPips, InpProfitLockTriggerPips, InpProfitLockGainPips);
+   hud += StringFormat(" Order Execution Lot : %.2f %s\n", lot, InpUseDynamicRisk ? "(Dynamic)" : "(Fixed 0.01)");
    hud += "---------------- PERMISSIONS --------------------\n";
    hud += StringFormat(" Toolbar Algo Trading : %s\n", termTrade ? "ON [GREEN OK]" : "OFF! [CLICK TOOLBAR ALGO TRADING]");
    hud += StringFormat(" Chart EA Permission  : %s\n", eaTrade ? "ALLOWED [OK]" : "BLOCKED! [F7 -> Common -> Allow Algo Trading]");
@@ -318,8 +376,10 @@ int OnInit()
       return INIT_FAILED;
    }
 
-   PrintFormat("[TG-Robot] TradeGear Confluence Robot initialized on %s (Spread Limit: %d pts)",
-               _Symbol, (int)GetMaxSpreadLimit(_Symbol));
+   double slPips = GetAdaptiveSLPips(_Symbol);
+   double tpPips = GetAdaptiveTPPips(_Symbol);
+   PrintFormat("[TG-Robot] Initialized v1.05 on %s | SL: %.0fp | TP: %.0fp (1:2 RR) | Lot: %.2f | Spread Limit: %d pts",
+               _Symbol, slPips, tpPips, InpFixedLot, (int)GetMaxSpreadLimit(_Symbol));
    PrintFormat("[TG-Robot] Pre-flight Check: TerminalTradeAllowed=%s | EATradeAllowed=%s | AcctTradeAllowed=%s",
                TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ? "YES" : "NO",
                MQLInfoInteger(MQL_TRADE_ALLOWED) ? "YES" : "NO",
@@ -344,7 +404,7 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // 1. Manage active position protections on every tick
+   // 1. Manage active position protections on every tick (BEP, Golden Profit Lock, Trailing)
    ManagePositionsProtection();
 
    // 2. Read indicator buffers for previous completed candle (index 1)
@@ -374,7 +434,6 @@ void OnTick()
       return;
    }
 
-   double closePrice = iClose(_Symbol, _Period, 1);
    string signalStatus = "SCANNING...";
 
    if(openCount == 0)
@@ -383,8 +442,43 @@ void OnTick()
       int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
       int pointsPerPip = GetPointsPerPip(_Symbol);
 
-      bool isBullish = (fastEMA > slowEMA && closePrice > fastEMA && rsi >= InpRSIBullishMin && rsi <= InpRSIBullishMax);
-      bool isBearish = (fastEMA < slowEMA && closePrice < fastEMA && rsi >= InpRSIBearishMin && rsi <= InpRSIBearishMax);
+      double slPips = GetAdaptiveSLPips(_Symbol);
+      double tpPips = GetAdaptiveTPPips(_Symbol);
+      double lot = InpUseDynamicRisk ? CalculateLotSize(_Symbol, slPips, InpRiskPercent) : InpFixedLot;
+
+      double open1  = iOpen(_Symbol, _Period, 1);
+      double high1  = iHigh(_Symbol, _Period, 1);
+      double low1   = iLow(_Symbol, _Period, 1);
+      double close1 = iClose(_Symbol, _Period, 1);
+
+      // Maximum allowable distance from Fast EMA to avoid buying/selling at exhausted extremes:
+      double maxDistFromEMA = slPips * 0.70 * pointsPerPip * point;
+
+      // BULLISH CONFLUENCE:
+      // 1. Fast EMA > Slow EMA (Uptrend bias)
+      // 2. Candle 1 closed above Fast EMA
+      // 3. Candle 1 closed bullish or with lower wick testing EMA (pullback confirmation)
+      // 4. Price not overextended beyond maxDistFromEMA
+      // 5. RSI in healthy bullish expansion zone (46 to 62)
+      bool pullbackBuy = (!InpRequirePullback || low1 <= fastEMA || (close1 - fastEMA) <= maxDistFromEMA);
+      bool isBullish = (fastEMA > slowEMA &&
+                        close1 > fastEMA &&
+                        close1 >= open1 &&
+                        pullbackBuy &&
+                        rsi >= InpRSIBullishMin && rsi <= InpRSIBullishMax);
+
+      // BEARISH CONFLUENCE:
+      // 1. Fast EMA < Slow EMA (Downtrend bias)
+      // 2. Candle 1 closed below Fast EMA
+      // 3. Candle 1 closed bearish or with upper wick testing EMA (pullback confirmation)
+      // 4. Price not overextended beyond maxDistFromEMA
+      // 5. RSI in healthy bearish expansion zone (38 to 54 - NOT oversold < 38)
+      bool pullbackSell = (!InpRequirePullback || high1 >= fastEMA || (fastEMA - close1) <= maxDistFromEMA);
+      bool isBearish = (fastEMA < slowEMA &&
+                        close1 < fastEMA &&
+                        close1 <= open1 &&
+                        pullbackSell &&
+                        rsi >= InpRSIBearishMin && rsi <= InpRSIBearishMax);
 
       if(isBullish || isBearish)
       {
@@ -429,16 +523,16 @@ void OnTick()
          if(isBullish)
          {
             double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-            double sl = NormalizeDouble(ask - (InpStopLossPips * pointsPerPip * point), digits);
-            double tp = NormalizeDouble(ask + (InpTakeProfitPips * pointsPerPip * point), digits);
-            double lot = CalculateLotSize(_Symbol, InpStopLossPips, InpRiskPercent);
+            double sl = NormalizeDouble(ask - (slPips * pointsPerPip * point), digits);
+            double tp = NormalizeDouble(ask + (tpPips * pointsPerPip * point), digits);
 
             ResetLastError();
             if(g_trade.Buy(lot, _Symbol, ask, sl, tp, InpOrderComment))
             {
-               PrintFormat("[TG-Robot] BUY executed! Lot: %.2f | Ask: %.5f | SL: %.5f | TP: %.5f", lot, ask, sl, tp);
+               PrintFormat("[TG-Robot] BUY executed! Lot: %.2f | Ask: %.5f | SL: %.5f (-%.0fp) | TP: %.5f (+%.0fp) [1:2 RR]",
+                           lot, ask, sl, slPips, tp, tpPips);
                g_lastBarTime = currentBarTime;
-               signalStatus = "BUY EXECUTED";
+               signalStatus = "BUY EXECUTED (1:2 RR)";
             }
             else
             {
@@ -450,16 +544,16 @@ void OnTick()
          else if(isBearish)
          {
             double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-            double sl = NormalizeDouble(bid + (InpStopLossPips * pointsPerPip * point), digits);
-            double tp = NormalizeDouble(bid - (InpTakeProfitPips * pointsPerPip * point), digits);
-            double lot = CalculateLotSize(_Symbol, InpStopLossPips, InpRiskPercent);
+            double sl = NormalizeDouble(bid + (slPips * pointsPerPip * point), digits);
+            double tp = NormalizeDouble(bid - (tpPips * pointsPerPip * point), digits);
 
             ResetLastError();
             if(g_trade.Sell(lot, _Symbol, bid, sl, tp, InpOrderComment))
             {
-               PrintFormat("[TG-Robot] SELL executed! Lot: %.2f | Bid: %.5f | SL: %.5f | TP: %.5f", lot, bid, sl, tp);
+               PrintFormat("[TG-Robot] SELL executed! Lot: %.2f | Bid: %.5f | SL: %.5f (+%.0fp) | TP: %.5f (-%.0fp) [1:2 RR]",
+                           lot, bid, sl, slPips, tp, tpPips);
                g_lastBarTime = currentBarTime;
-               signalStatus = "SELL EXECUTED";
+               signalStatus = "SELL EXECUTED (1:2 RR)";
             }
             else
             {
