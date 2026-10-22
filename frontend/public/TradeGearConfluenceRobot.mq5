@@ -267,18 +267,29 @@ void UpdateChartHUD(double fastEMA, double slowEMA, double rsi, string signalSta
 {
    double maxSpreadAllowed = GetMaxSpreadLimit(_Symbol);
    int curSpread = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   
+   bool termTrade = (bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
+   bool eaTrade   = (bool)MQLInfoInteger(MQL_TRADE_ALLOWED);
+   bool acctTrade = (bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED);
+
    string bias = "NEUTRAL";
    if(fastEMA > slowEMA && fastEMA > 0) bias = "BULLISH (UPTREND)";
    else if(fastEMA < slowEMA && slowEMA > 0) bias = "BEARISH (DOWNTREND)";
 
    string hud = "=================================================\n";
-   hud += "  TRADEGEAR CONFLUENCE ROBOT (AUTONOMOUS EA) v1.01\n";
+   hud += "  TRADEGEAR CONFLUENCE ROBOT (AUTONOMOUS EA) v1.02\n";
    hud += "=================================================\n";
    hud += StringFormat(" Symbol: %s | Timeframe: %s | Magic: %I64u\n", _Symbol, EnumToString(_Period), InpMagicNumber);
    hud += StringFormat(" Fast EMA (%d): %.5f | Slow EMA (%d): %.5f\n", InpFastEMAPeriod, fastEMA, InpSlowEMAPeriod, slowEMA);
    hud += StringFormat(" RSI (%d): %.2f | Market Bias: %s\n", InpRSIPeriod, rsi, bias);
    hud += StringFormat(" Spread: %d pts (Limit: %d pts) | Open Pos: %d\n", curSpread, (int)maxSpreadAllowed, CountOpenPositions(_Symbol, InpMagicNumber));
-   hud += StringFormat(" Risk Lot: %.1f%% Equity | Status: %s\n", InpRiskPercent, signalStatus);
+   hud += StringFormat(" Risk Lot: %.1f%% Equity\n", InpRiskPercent);
+   hud += "---------------- PERMISSIONS --------------------\n";
+   hud += StringFormat(" Toolbar Algo Trading : %s\n", termTrade ? "ON [GREEN OK]" : "OFF! [CLICK TOOLBAR ALGO TRADING]");
+   hud += StringFormat(" Chart EA Permission  : %s\n", eaTrade ? "ALLOWED [OK]" : "BLOCKED! [F7 -> Common -> Allow Algo Trading]");
+   hud += StringFormat(" Account Trade Mode   : %s\n", acctTrade ? "TRADING ACTIVE [OK]" : "READ-ONLY (INVESTOR PASSWORD!)");
+   hud += "-------------------------------------------------\n";
+   hud += StringFormat(" Status: %s\n", signalStatus);
    hud += "=================================================\n";
    hud += " Note: Run TradeGearMonitor.ex5 on another chart\n";
    hud += " to stream telemetry & journal in TradeGear SaaS.\n";
@@ -309,6 +320,10 @@ int OnInit()
 
    PrintFormat("[TG-Robot] TradeGear Confluence Robot initialized on %s (Spread Limit: %d pts)",
                _Symbol, (int)GetMaxSpreadLimit(_Symbol));
+   PrintFormat("[TG-Robot] Pre-flight Check: TerminalTradeAllowed=%s | EATradeAllowed=%s | AcctTradeAllowed=%s",
+               TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ? "YES" : "NO",
+               MQLInfoInteger(MQL_TRADE_ALLOWED) ? "YES" : "NO",
+               AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ? "YES" : "NO");
    return INIT_SUCCEEDED;
 }
 
@@ -368,48 +383,89 @@ void OnTick()
       int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
       int pointsPerPip = GetPointsPerPip(_Symbol);
 
-      // --- BULLISH CONFLUENCE ---
-      // Fast EMA > Slow EMA, Candle Close > Fast EMA, RSI in healthy bullish expansion
-      if(fastEMA > slowEMA && closePrice > fastEMA && rsi >= InpRSIBullishMin && rsi <= InpRSIBullishMax)
-      {
-         double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         double sl = NormalizeDouble(ask - (InpStopLossPips * pointsPerPip * point), digits);
-         double tp = NormalizeDouble(ask + (InpTakeProfitPips * pointsPerPip * point), digits);
-         double lot = CalculateLotSize(_Symbol, InpStopLossPips, InpRiskPercent);
+      bool isBullish = (fastEMA > slowEMA && closePrice > fastEMA && rsi >= InpRSIBullishMin && rsi <= InpRSIBullishMax);
+      bool isBearish = (fastEMA < slowEMA && closePrice < fastEMA && rsi >= InpRSIBearishMin && rsi <= InpRSIBearishMax);
 
-         ResetLastError();
-         if(g_trade.Buy(lot, _Symbol, ask, sl, tp, InpOrderComment))
-         {
-            PrintFormat("[TG-Robot] BUY executed! Lot: %.2f | Ask: %.5f | SL: %.5f | TP: %.5f", lot, ask, sl, tp);
-            g_lastBarTime = currentBarTime;
-            signalStatus = "BUY EXECUTED";
-         }
-         else
-         {
-            PrintFormat("[TG-Robot] BUY order failed! Error: %d", GetLastError());
-            signalStatus = StringFormat("BUY ERROR (%d)", GetLastError());
-         }
-      }
-      // --- BEARISH CONFLUENCE ---
-      // Fast EMA < Slow EMA, Candle Close < Fast EMA, RSI in healthy bearish expansion
-      else if(fastEMA < slowEMA && closePrice < fastEMA && rsi >= InpRSIBearishMin && rsi <= InpRSIBearishMax)
+      if(isBullish || isBearish)
       {
-         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         double sl = NormalizeDouble(bid + (InpStopLossPips * pointsPerPip * point), digits);
-         double tp = NormalizeDouble(bid - (InpTakeProfitPips * pointsPerPip * point), digits);
-         double lot = CalculateLotSize(_Symbol, InpStopLossPips, InpRiskPercent);
+         bool termTrade = (bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
+         bool eaTrade   = (bool)MQLInfoInteger(MQL_TRADE_ALLOWED);
+         bool acctTrade = (bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED);
 
-         ResetLastError();
-         if(g_trade.Sell(lot, _Symbol, bid, sl, tp, InpOrderComment))
+         if(!termTrade)
          {
-            PrintFormat("[TG-Robot] SELL executed! Lot: %.2f | Bid: %.5f | SL: %.5f | TP: %.5f", lot, bid, sl, tp);
-            g_lastBarTime = currentBarTime;
-            signalStatus = "SELL EXECUTED";
+            signalStatus = "BLOCKED: Toolbar 'Algo Trading' is OFF!";
+            UpdateChartHUD(fastEMA, slowEMA, rsi, signalStatus);
+            static datetime lastPrintTerm = 0;
+            if(TimeCurrent() - lastPrintTerm > 5)
+            {
+               Print("[TG-Robot] Order blocked! 'Algo Trading' button in MT5 toolbar is turned OFF. Click it so it turns GREEN.");
+               lastPrintTerm = TimeCurrent();
+            }
+            return;
          }
-         else
+
+         if(!eaTrade)
          {
-            PrintFormat("[TG-Robot] SELL order failed! Error: %d", GetLastError());
-            signalStatus = StringFormat("SELL ERROR (%d)", GetLastError());
+            signalStatus = "BLOCKED: Press F7 -> Common -> Check 'Allow Algo Trading'";
+            UpdateChartHUD(fastEMA, slowEMA, rsi, signalStatus);
+            static datetime lastPrintEA = 0;
+            if(TimeCurrent() - lastPrintEA > 5)
+            {
+               Print("[TG-Robot] Order blocked! EA permission is disabled on chart. Press F7 -> Tab Common -> Check 'Allow Algo Trading' -> Click OK.");
+               lastPrintEA = TimeCurrent();
+            }
+            return;
+         }
+
+         if(!acctTrade)
+         {
+            signalStatus = "BLOCKED: Account is Read-Only (Investor Password)";
+            UpdateChartHUD(fastEMA, slowEMA, rsi, signalStatus);
+            return;
+         }
+
+         // --- BULLISH EXECUTION ---
+         if(isBullish)
+         {
+            double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+            double sl = NormalizeDouble(ask - (InpStopLossPips * pointsPerPip * point), digits);
+            double tp = NormalizeDouble(ask + (InpTakeProfitPips * pointsPerPip * point), digits);
+            double lot = CalculateLotSize(_Symbol, InpStopLossPips, InpRiskPercent);
+
+            ResetLastError();
+            if(g_trade.Buy(lot, _Symbol, ask, sl, tp, InpOrderComment))
+            {
+               PrintFormat("[TG-Robot] BUY executed! Lot: %.2f | Ask: %.5f | SL: %.5f | TP: %.5f", lot, ask, sl, tp);
+               g_lastBarTime = currentBarTime;
+               signalStatus = "BUY EXECUTED";
+            }
+            else
+            {
+               PrintFormat("[TG-Robot] BUY order failed! Error: %d", GetLastError());
+               signalStatus = StringFormat("BUY ERROR (%d)", GetLastError());
+            }
+         }
+         // --- BEARISH EXECUTION ---
+         else if(isBearish)
+         {
+            double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+            double sl = NormalizeDouble(bid + (InpStopLossPips * pointsPerPip * point), digits);
+            double tp = NormalizeDouble(bid - (InpTakeProfitPips * pointsPerPip * point), digits);
+            double lot = CalculateLotSize(_Symbol, InpStopLossPips, InpRiskPercent);
+
+            ResetLastError();
+            if(g_trade.Sell(lot, _Symbol, bid, sl, tp, InpOrderComment))
+            {
+               PrintFormat("[TG-Robot] SELL executed! Lot: %.2f | Bid: %.5f | SL: %.5f | TP: %.5f", lot, bid, sl, tp);
+               g_lastBarTime = currentBarTime;
+               signalStatus = "SELL EXECUTED";
+            }
+            else
+            {
+               PrintFormat("[TG-Robot] SELL order failed! Error: %d", GetLastError());
+               signalStatus = StringFormat("SELL ERROR (%d)", GetLastError());
+            }
          }
       }
       else
