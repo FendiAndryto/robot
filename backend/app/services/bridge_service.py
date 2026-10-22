@@ -81,30 +81,23 @@ class BridgeService:
                 return session.latest_payload.equity
             return None
 
-    def trigger_kill_switch(self, reason: str = "Manual Emergency Kill Switch Triggered", username: str = "admin") -> dict:
+    def trigger_kill_switch(self, reason: str = "Manual Emergency Watchdog Alert", username: str = "admin") -> dict:
         current_time = int(time.time())
-        cmd_id = f"cmd_{current_time}_kill_{uuid.uuid4().hex[:6]}"
-        kill_cmd = CommandItem(
-            command_id=cmd_id,
-            action="CLOSE_ALL",
-            created_at=current_time
-        )
         with self._lock:
             session = self._get_or_create_session(username)
             session.is_kill_switch_active = True
             session.kill_switch_reason = reason
             session.kill_switch_time = current_time
             session.kill_switch_user = username
-            session.pending_commands.insert(0, kill_cmd)
-            closed_count = len(session.latest_payload.positions) if session.latest_payload else 0
+            open_count = len(session.latest_payload.positions) if session.latest_payload else 0
 
-        # Dispatch structured Telegram emergency alert
+        # Dispatch structured Telegram watchdog alert (zero remote execution commands sent to MT5)
         try:
             from app.services.telegram_service import telegram_service
             telegram_service.send_kill_switch_alert_background(
                 reason=reason,
                 triggered_by=username,
-                closed_count=closed_count
+                closed_count=open_count
             )
         except Exception:
             pass
@@ -115,8 +108,8 @@ class BridgeService:
             "reason": reason,
             "triggered_at": current_time,
             "triggered_by": username,
-            "command_id": cmd_id,
-            "message": "Emergency Kill Switch engaged. Blanket CLOSE_ALL command dispatched to MT5. Trading engine locked."
+            "command_id": None,
+            "message": "Risk Watchdog alert engaged. Telegram notification dispatched. Note: In Pure Read-Only mode, no liquidation commands are sent to MT5."
         }
 
     def disarm_kill_switch(self, username: str = "admin") -> dict:
@@ -130,7 +123,7 @@ class BridgeService:
         return {
             "status": "disarmed",
             "is_kill_switch_active": False,
-            "message": "Trading engine disarmed and unlocked. Normal trading operations restored.",
+            "message": "Risk Watchdog alert disarmed and unlocked. Normal analytical operations restored.",
             "unlocked_by": username
         }
 
@@ -276,82 +269,21 @@ class BridgeService:
             except Exception:
                 pass
 
-        # Pop pending commands specifically for this user
+        # In Pure Read-Only SaaS architecture, TradeGear never sends execution commands to MT5
         with self._lock:
-            commands_to_send = list(session.pending_commands)
             session.pending_commands.clear()
 
         return HeartbeatResponse(
             status="ok",
             server_time=int(current_time),
-            commands=commands_to_send
+            commands=[]
         )
 
     def submit_order(self, order_req: OrderRequest, username: Optional[str] = None) -> OrderResponse:
-        action = order_req.action.upper().strip()
-        current_time = int(time.time())
-        user_key = self._normalize_user(username)
-
-        with self._lock:
-            session = self._get_or_create_session(user_key)
-            if session.is_kill_switch_active and action in ("BUY", "SELL"):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Trading engine is locked by emergency Kill Switch ({session.kill_switch_reason or 'Emergency lockdown'}). Disarm Kill Switch before submitting new orders."
-                )
-
-        from app.services.autopilot_service import autopilot_service
-        if autopilot_service.is_drawdown_locked(username=user_key) and action in ("BUY", "SELL"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Trading engine is locked by Daily Drawdown Guard: Maximum allowable daily loss threshold exceeded."
-            )
-
-        if action in ("BUY", "SELL"):
-            if not order_req.symbol or not order_req.symbol.strip():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Symbol is required for BUY/SELL orders."
-                )
-            if not order_req.volume or order_req.volume <= 0:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Volume must be greater than 0.0."
-                )
-        elif action == "CLOSE":
-            if not order_req.ticket or order_req.ticket <= 0:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Position ticket ID is required for CLOSE action."
-                )
-        elif action == "CLOSE_ALL":
-            pass
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unknown order action: {action}"
-            )
-
-        cmd_id = f"cmd_{current_time}_{uuid.uuid4().hex[:6]}"
-        command = CommandItem(
-            command_id=cmd_id,
-            action=action,
-            symbol=order_req.symbol,
-            volume=order_req.volume,
-            sl=order_req.sl,
-            tp=order_req.tp,
-            ticket=order_req.ticket,
-            created_at=current_time
-        )
-
-        with self._lock:
-            session.pending_commands.append(command)
-
-        return OrderResponse(
-            status="queued",
-            command_id=cmd_id,
-            message=f"Order {action} successfully queued for MT5 bridge execution",
-            command=command
+        """Pure Read-Only SaaS Enforcement: Direct order execution is permanently disabled."""
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="TradeGear is a 100% Pure Read-Only SaaS platform. Trade execution and liquidations are disabled."
         )
 
     def get_positions(self, username: Optional[str] = None) -> List[PositionItem]:

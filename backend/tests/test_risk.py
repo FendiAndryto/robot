@@ -179,7 +179,7 @@ def test_kill_switch_lifecycle():
     assert bridge_status["is_kill_switch_active"] is True
     assert bridge_status["kill_switch_reason"] == "Test Market Volatility Spike"
 
-    # 4. Verify CLOSE_ALL command is queued for MT5
+    # 4. Verify ZERO liquidation commands are queued for MT5 (Pure Read-Only SaaS)
     hb_resp = client.post("/api/v1/bridge/heartbeat", json={
         "account_number": 12345,
         "server": "Demo",
@@ -191,36 +191,31 @@ def test_kill_switch_lifecycle():
     })
     assert hb_resp.status_code == 200
     commands = hb_resp.json()["commands"]
-    assert len(commands) == 1
-    assert commands[0]["action"] == "CLOSE_ALL"
+    assert commands == []
 
-    # 5. Internal service BUY or SELL must raise HTTPException 403 while Kill Switch is active
+    # 5. Internal service BUY or SELL raises HTTPException 403 (Pure Read-Only platform)
     from app.models.bridge import OrderRequest
     from fastapi import HTTPException
     import pytest
     with pytest.raises(HTTPException) as exc_info:
         bridge_service.submit_order(OrderRequest(action="BUY", symbol="EURUSD", volume=0.1), username=settings.ADMIN_USERNAME)
     assert exc_info.value.status_code == 403
-    assert "locked by emergency Kill Switch" in exc_info.value.detail
+    assert "TradeGear is a 100% Pure Read-Only SaaS platform" in exc_info.value.detail
 
-    # 6. Web API always returns 403 (manual order execution disabled)
+    # 6. Web API always returns 403 (pure read-only SaaS)
     buy_resp = client.post("/api/v1/bridge/order", json={
         "action": "BUY",
         "symbol": "EURUSD",
         "volume": 0.1
     }, headers=auth_headers)
     assert buy_resp.status_code == 403
-    assert "Manual order placement from web application is disabled" in buy_resp.json()["detail"]
+    assert "TradeGear is a 100% Pure Read-Only SaaS platform" in buy_resp.json()["detail"]
 
-    # 7. Disarm / unlock the kill switch
+    # 7. Disarm / unlock the risk watchdog
     unlock_resp = client.post("/api/v1/risk/unlock", headers=auth_headers)
     assert unlock_resp.status_code == 200
     assert unlock_resp.json()["status"] == "disarmed"
     assert unlock_resp.json()["is_kill_switch_active"] is False
-
-    # 8. Internal service BUY is now permitted again
-    buy_again_resp = bridge_service.submit_order(OrderRequest(action="BUY", symbol="EURUSD", volume=0.1), username=settings.ADMIN_USERNAME)
-    assert buy_again_resp.status == "queued"
 
 
 def test_kill_switch_unauthorized():

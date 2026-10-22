@@ -55,3 +55,15 @@ _Avoid_: MT5 password, broker pin, user secret
 **Isolated Bridge Session**:
 The strictly private runtime state (telemetry, positions, deal history, drawdown guard, and autopilot) maintained independently for each TradeGear User.
 _Avoid_: Shared telemetry, global bridge, common feed
+
+**TradeGearMonitor**:
+The ultra-lightweight, 100% pure read-only MetaTrader 5 Expert Advisor that transmits real-time account telemetry (balances, equity, margin, positions, history, quotes) to TradeGear without trade execution capabilities.
+_Avoid_: Bridge robot, execution EA, trader bot
+
+**Pure Read-Only SaaS Telemetry**:
+The architectural design guarantee that TradeGear operates strictly as an analytical observer and journal, possessing zero technical capability to open, modify, or liquidate trades on user accounts.
+_Avoid_: Remote execution desk, web trading engine
+
+**Risk Watchdog**:
+The passive account risk monitor that evaluates equity drawdown and margin utilization against user-defined safety thresholds, dispatching high-priority alerts without touching active orders.
+_Avoid_: Emergency kill switch, order liquidator, automated slasher

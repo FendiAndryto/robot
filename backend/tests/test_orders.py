@@ -31,7 +31,7 @@ def get_auth_context(username: str = settings.ADMIN_USERNAME):
 
 
 def test_manual_order_submission_disabled_on_api():
-    """Manual order execution is explicitly disabled via web API (Full-Auto trading only)."""
+    """Order execution is explicitly disabled via web API under Pure Read-Only SaaS architecture."""
     headers, _ = get_auth_context()
 
     res = client.post(
@@ -40,15 +40,16 @@ def test_manual_order_submission_disabled_on_api():
         headers=headers
     )
     assert res.status_code == 403
-    assert "Manual order placement from web application is disabled" in res.json()["detail"]
+    assert "TradeGear is a 100% Pure Read-Only SaaS platform" in res.json()["detail"]
 
 
-def test_internal_order_queueing_and_heartbeat_pop():
-    """Internal service order queueing (from strategy / AutoPilot) works and delivers to MT5 via heartbeat."""
+def test_pure_read_only_saas_rejects_order_execution_and_commands_empty():
+    """Under Pure Read-Only SaaS architecture, order submission is permanently disabled and heartbeat returns zero commands."""
     headers, bridge_token = get_auth_context()
     bridge_service.reset_state()
 
-    # 1. Queue a BUY order internally (as AutoPilot engine does)
+    # 1. Direct submit_order call must raise HTTPException 403 Forbidden
+    from fastapi import HTTPException
     buy_order = OrderRequest(
         action="BUY",
         symbol="EURUSD",
@@ -56,24 +57,17 @@ def test_internal_order_queueing_and_heartbeat_pop():
         sl=1.08500,
         tp=1.09500
     )
-    buy_res = bridge_service.submit_order(buy_order, username=settings.ADMIN_USERNAME)
-    assert buy_res.status == "queued"
-    assert buy_res.command.action == "BUY"
-    assert buy_res.command.symbol == "EURUSD"
-    assert buy_res.command.volume == 0.05
+    with pytest.raises(HTTPException) as exc_info:
+        bridge_service.submit_order(buy_order, username=settings.ADMIN_USERNAME)
+    assert exc_info.value.status_code == 403
+    assert "TradeGear is a 100% Pure Read-Only SaaS platform" in exc_info.value.detail
 
-    # 2. Queue a CLOSE order internally
-    close_order = OrderRequest(action="CLOSE", ticket=554433)
-    close_res = bridge_service.submit_order(close_order, username=settings.ADMIN_USERNAME)
-    assert close_res.status == "queued"
-    assert close_res.command.ticket == 554433
-
-    # Status shows 2 pending commands
+    # 2. Status shows 0 pending commands
     status_res = client.get("/api/v1/bridge/status", headers=headers)
     assert status_res.status_code == 200
-    assert status_res.json()["pending_commands_count"] == 2
+    assert status_res.json()["pending_commands_count"] == 0
 
-    # 3. EA calls heartbeat -> both commands must be delivered
+    # 3. EA calls heartbeat -> commands must be empty list
     hb_payload = {
         "account_number": 12345678,
         "server": "Demo-Server",
@@ -93,16 +87,4 @@ def test_internal_order_queueing_and_heartbeat_pop():
     hb_res = client.post("/api/v1/bridge/heartbeat", json=hb_payload)
     assert hb_res.status_code == 200
     commands = hb_res.json()["commands"]
-    assert len(commands) == 2
-    assert commands[0]["action"] == "BUY"
-    assert commands[0]["symbol"] == "EURUSD"
-    assert commands[1]["action"] == "CLOSE"
-    assert commands[1]["ticket"] == 554433
-
-    # 4. Status reflects pending_commands_count == 0 after dispatch
-    status_res_after = client.get("/api/v1/bridge/status", headers=headers)
-    assert status_res_after.json()["pending_commands_count"] == 0
-
-    # 5. Subsequent heartbeat receives empty command list
-    hb_res2 = client.post("/api/v1/bridge/heartbeat", json=hb_payload)
-    assert len(hb_res2.json()["commands"]) == 0
+    assert commands == []

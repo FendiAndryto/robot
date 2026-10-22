@@ -101,12 +101,12 @@ async def get_equity_curve(
 @router.post(
     "/order",
     status_code=status.HTTP_403_FORBIDDEN,
-    summary="Manual order execution disabled (Full-Auto trading only)"
+    summary="Order execution disabled (Pure Read-Only SaaS Telemetry)"
 )
 async def submit_order():
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Manual order placement from web application is disabled. Trading is strictly full-auto only via autonomous AutoPilot."
+        detail="TradeGear is a 100% Pure Read-Only SaaS platform. Trade execution and liquidations are disabled."
     )
 
 

@@ -29,12 +29,12 @@ async def get_signals(
 @router.post(
     "/signals/{signal_id}/approve",
     status_code=status.HTTP_403_FORBIDDEN,
-    summary="Semi-Auto signal approval disabled (Full-Auto trading only)"
+    summary="Signal execution to MT5 disabled (Pure Read-Only SaaS Telemetry)"
 )
 async def approve_signal(signal_id: str):
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Semi-auto signal approval is disabled. Trading is strictly full-auto only via autonomous AutoPilot."
+        detail="Signal execution to MT5 is disabled. TradeGear is a 100% Pure Read-Only SaaS platform."
     )
 
 

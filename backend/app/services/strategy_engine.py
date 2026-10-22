@@ -251,18 +251,14 @@ class StrategyEngine:
         with self._lock:
             self._signals[signal_id] = signal
 
-        # Autonomous Auto-Pilot Execution Hook
+        # Autonomous AutoPilot Analytical Observer Hook
         from app.services.autopilot_service import autopilot_service
         is_auto_active = autopilot_service.is_autopilot_active(username=username) and not autopilot_service.is_drawdown_locked(username=username)
         if is_auto_active:
-            try:
-                self.approve_signal(signal_id, username=username)
-                autopilot_service.increment_auto_executed_count(username=username)
-                signal.reason += " [AUTOPILOT AUTO-EXECUTED]"
-            except Exception:
-                pass
+            autopilot_service.increment_auto_executed_count(username=username)
+            signal.reason += " [AUTOPILOT DETECTED]"
 
-        # Dispatch Telegram signal alert
+        # Dispatch Telegram signal recommendation alert
         try:
             from app.services.telegram_service import telegram_service
             telegram_service.send_signal_alert_background({
@@ -272,7 +268,7 @@ class StrategyEngine:
                 "current_price": signal.entry_price,
                 "suggested_sl": signal.sl,
                 "suggested_tp": signal.tp,
-                "status": "APPROVED" if is_auto_active else "PENDING",
+                "status": "RECOMMENDED" if is_auto_active else "PENDING",
                 "is_autopilot": is_auto_active
             })
         except Exception:
@@ -387,16 +383,12 @@ class StrategyEngine:
         with self._lock:
             self._signals[signal_id] = signal
 
-        # Autonomous Auto-Pilot Execution Hook
+        # Autonomous AutoPilot Analytical Observer Hook
         from app.services.autopilot_service import autopilot_service
         is_auto_active = autopilot_service.is_autopilot_active(username=username) and not autopilot_service.is_drawdown_locked(username=username)
         if is_auto_active:
-            try:
-                self.approve_signal(signal_id, username=username)
-                autopilot_service.increment_auto_executed_count(username=username)
-                signal.reason += " [AUTOPILOT AUTO-EXECUTED]"
-            except Exception:
-                pass
+            autopilot_service.increment_auto_executed_count(username=username)
+            signal.reason += " [AUTOPILOT DETECTED]"
 
         # Dispatch Telegram signal alert
         try:
@@ -408,7 +400,7 @@ class StrategyEngine:
                 "current_price": signal.entry_price,
                 "suggested_sl": signal.sl,
                 "suggested_tp": signal.tp,
-                "status": "APPROVED" if is_auto_active else "PENDING",
+                "status": "RECOMMENDED" if is_auto_active else "PENDING",
                 "is_autopilot": is_auto_active
             })
         except Exception:
@@ -459,26 +451,15 @@ class StrategyEngine:
                     detail="Cannot approve signal. Signal has expired."
                 )
 
-            lot_to_execute = custom_lot if (custom_lot and custom_lot > 0) else signal.recommended_lot
-
-        # Submit order through bridge pipeline
-        order_req = OrderRequest(
-            action=signal.action,
-            symbol=signal.symbol,
-            volume=lot_to_execute,
-            sl=signal.sl,
-            tp=signal.tp
-        )
-        order_res = bridge_service.submit_order(order_req, username=username)
-
+        # Pure Read-Only SaaS architecture: TradeGear never submits orders to MT5
         with self._lock:
             signal.status = "APPROVED"
 
         return {
             "status": "approved",
             "signal": signal,
-            "order": order_res,
-            "message": f"Signal {signal.signal_id} approved. Executed {signal.action} {lot_to_execute} lots of {signal.symbol} to MT5."
+            "order": None,
+            "message": f"Signal {signal.signal_id} marked as approved (Analytical Read-Only Mode)."
         }
 
     def dismiss_signal(self, signal_id: str, reason: str = "Manual dismissal") -> dict:

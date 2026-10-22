@@ -139,22 +139,23 @@ def test_approve_signal_disabled_on_api_and_works_internally():
     assert gen_resp.status_code == 200
     signal_id = gen_resp.json()["signal_id"]
 
-    # 2. Web API approve must be rejected with 403 Forbidden (Full-Auto trading only)
+    # 2. Web API approve must be rejected with 403 Forbidden
     approve_resp = client.post(
         f"/api/v1/strategy/signals/{signal_id}/approve",
         json={"custom_lot": 0.25},
         headers=auth_headers
     )
     assert approve_resp.status_code == 403
-    assert "Semi-auto signal approval is disabled" in approve_resp.json()["detail"]
+    assert "Signal execution to MT5 is disabled" in approve_resp.json()["detail"]
 
-    # 3. Strategy engine internally can auto-execute the signal (as AutoPilot does)
+    # 3. Strategy engine internally marks signal as approved (Analytical Read-Only Mode)
     from app.services.strategy_engine import strategy_engine
     exec_res = strategy_engine.approve_signal(signal_id=signal_id, custom_lot=0.25, username="admin")
     assert exec_res["status"] == "approved"
     assert exec_res["signal"].status == "APPROVED"
+    assert exec_res["order"] is None
 
-    # 4. Verify order was queued to bridge
+    # 4. Verify ZERO orders are queued to MT5 bridge (Pure Read-Only SaaS)
     hb_resp = client.post("/api/v1/bridge/heartbeat", json={
         "account_number": 12345,
         "server": "Demo",
@@ -166,10 +167,7 @@ def test_approve_signal_disabled_on_api_and_works_internally():
     })
     assert hb_resp.status_code == 200
     commands = hb_resp.json()["commands"]
-    assert len(commands) == 1
-    assert commands[0]["action"] == "BUY"
-    assert commands[0]["symbol"] == "XAUUSD"
-    assert commands[0]["volume"] == 0.25
+    assert commands == []
 
 
 def test_dismiss_signal():

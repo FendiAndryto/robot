@@ -77,8 +77,8 @@ export default function Mt5ConnectModal({
               <Laptop size={22} style={{ color: '#45e0ad' }} />
             </div>
             <div>
-              <h3 className="mt5-modal-title">KONEKSI MT5 LOKAL LAPTOP</h3>
-              <span className="mt5-modal-subtitle">Private & Secure Direct WinINet Bridge</span>
+              <h3 className="mt5-modal-title">KONEKSI MT5 TELEMETRY MONITOR</h3>
+              <span className="mt5-modal-subtitle">Pure Read-Only Telemetry (100% Aman & Bebas Risiko Eksekusi)</span>
             </div>
           </div>
           <button
@@ -181,7 +181,7 @@ export default function Mt5ConnectModal({
           {/* Target Backend Endpoint */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 600 }}>
-              URL Target Backend untuk BridgeEA:
+              URL Target Backend untuk TradeGearMonitor:
             </span>
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
@@ -213,7 +213,7 @@ export default function Mt5ConnectModal({
           {/* 3 Steps */}
           <div className="mt5-steps-container">
             <h4 className="mt5-steps-title">
-              Cara Menghubungkan BridgeEA di MT5 Laptop:
+              Cara Menghubungkan TradeGearMonitor di MT5 Laptop:
             </h4>
 
             <div className="mt5-step-card">
@@ -239,9 +239,9 @@ export default function Mt5ConnectModal({
             <div className="mt5-step-card">
               <div className="mt5-step-number">3</div>
               <div className="mt5-step-content">
-                <strong>Pasang BridgeEA pada Chart & Masukkan Token</strong>
+                <strong>Pasang TradeGearMonitor pada Chart & Masukkan Token</strong>
                 <p>
-                  Drag <code>BridgeEA</code> ke chart aktif (cth: XAUUSD M15). Pada tab <em>Inputs</em>, isi parameter <code>InpBridgeToken</code> dengan token pribadi Anda di atas. Pada tab <em>Common</em>, centang <strong>Allow Algo Trading</strong>.
+                  Drag <code>TradeGearMonitor.ex5</code> (atau <code>BridgeEA.ex5</code>) ke chart aktif (cth: XAUUSD M15). Pada tab <em>Inputs</em>, isi parameter <code>InpBridgeToken</code> dengan token pribadi Anda di atas. Pada tab <em>Common</em>, centang <strong>Allow Algo Trading</strong>. EA ini 100% Read-Only (telemetri) tanpa izin eksekusi order sehingga aman dipakai berdampingan dengan EA trading lain milik Anda.
                 </p>
               </div>
             </div>

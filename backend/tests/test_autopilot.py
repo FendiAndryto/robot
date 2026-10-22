@@ -111,7 +111,8 @@ def test_drawdown_calculation_and_guard_breach():
     assert reset_resp.json()["is_drawdown_lockout_active"] is False
 
 
-def test_autopilot_auto_execution_of_confluence_signals():
+def test_autopilot_analytical_detection_of_confluence_signals():
+    """Under Pure Read-Only SaaS, AutoPilot detects and tags confluence signals without executing trades or queueing MT5 commands."""
     auth_headers, bridge_token = get_auth_context()
 
     # 1. Establish baseline and turn on AutoPilot
@@ -127,11 +128,10 @@ def test_autopilot_auto_execution_of_confluence_signals():
     assert sig_resp.status_code == 200
     sig_data = sig_resp.json()
 
-    # In Auto-Pilot mode, signal is auto-executed!
-    assert sig_data["status"] == "APPROVED"
-    assert "AUTOPILOT AUTO-EXECUTED" in sig_data["reason"]
+    # In AutoPilot Analytical Observer mode, signal is detected and recommended
+    assert "AUTOPILOT DETECTED" in sig_data["reason"]
 
-    # Verify order was queued to MT5 bridge
+    # Verify ZERO orders were queued to MT5 bridge (Pure Read-Only SaaS)
     hb_resp = client.post("/api/v1/bridge/heartbeat", json={
         "account_number": 887766,
         "server": "Demo",
@@ -142,9 +142,7 @@ def test_autopilot_auto_execution_of_confluence_signals():
         "timestamp": int(time.time())
     })
     commands = hb_resp.json()["commands"]
-    assert len(commands) == 1
-    assert commands[0]["action"] == "BUY"
-    assert commands[0]["symbol"] == "EURUSD"
+    assert commands == []
 
 
 def test_autopilot_auth_guards():
@@ -245,9 +243,13 @@ def test_autopilot_candles_single_execution_no_duplicate():
     })
     assert hb_resp.status_code == 200
     commands = hb_resp.json()["commands"]
-    assert len(commands) == 1
-    assert commands[0]["action"] == "BUY"
-    assert commands[0]["symbol"] == "EURUSD"
+    assert commands == []
+
+    # Verify signal was evaluated and registered in strategy engine
+    signals = strategy_engine.get_signals(include_all=True)
+    assert len(signals) >= 1
+    assert signals[0].symbol == "EURUSD"
+    assert signals[0].action == "BUY"
 
 
 def test_user_isolated_autopilot_and_drawdown():
