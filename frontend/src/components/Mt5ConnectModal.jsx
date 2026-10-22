@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   CheckCircle2,
@@ -6,8 +6,11 @@ import {
   RefreshCw,
   Laptop,
   Check,
-  ShieldCheck
+  ShieldCheck,
+  KeyRound,
+  Copy
 } from 'lucide-react';
+import { api } from '../services/api';
 
 export default function Mt5ConnectModal({
   isOpen,
@@ -18,6 +21,23 @@ export default function Mt5ConnectModal({
 }) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [bridgeToken, setBridgeToken] = useState('');
+  const [copiedToken, setCopiedToken] = useState(false);
+  const [tokenLoading, setTokenLoading] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setTokenLoading(true);
+      api.getBridgeToken()
+        .then(data => {
+          if (data?.bridge_token) {
+            setBridgeToken(data.bridge_token);
+          }
+        })
+        .catch(() => {})
+        .finally(() => setTokenLoading(false));
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -40,6 +60,13 @@ export default function Mt5ConnectModal({
     setTimeout(() => setCopiedUrl(false), 2000);
   };
 
+  const handleCopyToken = () => {
+    if (!bridgeToken) return;
+    navigator.clipboard.writeText(bridgeToken);
+    setCopiedToken(true);
+    setTimeout(() => setCopiedToken(false), 2000);
+  };
+
   return (
     <div className="modal-backdrop animate-fade-in" id="mt5-connect-modal-backdrop">
       <div className="mt5-connect-modal glass-panel" id="mt5-connect-modal">
@@ -51,7 +78,7 @@ export default function Mt5ConnectModal({
             </div>
             <div>
               <h3 className="mt5-modal-title">KONEKSI MT5 LOKAL LAPTOP</h3>
-              <span className="mt5-modal-subtitle">High-Performance Direct WinINet Bridge</span>
+              <span className="mt5-modal-subtitle">Private & Secure Direct WinINet Bridge</span>
             </div>
           </div>
           <button
@@ -102,12 +129,53 @@ export default function Mt5ConnectModal({
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#45e0ad', fontWeight: 700 }}>
               <ShieldCheck size={15} />
-              <span>Direct Laptop Execution (Bebas Freeze Server):</span>
+              <span>Privat & Terisolasi Penuh:</span>
             </div>
             <div style={{ color: 'var(--text-main, #e2e8f0)', lineHeight: 1.4 }}>
-              MT5 berjalan langsung pada laptop Anda dengan performa native tanpa beban Wine/VNC server.
-              EA mengirimkan telemetry real-time dan mengeksekusi order dari web TradeGear secara instan.
+              Koneksi MT5 Anda diikat secara eksklusif menggunakan Bridge Token pribadi Anda. Akun pengguna lain yang login di TradeGear tidak akan pernah bisa melihat atau mengakses saldo dan trading MT5 Anda.
             </div>
+          </div>
+
+          {/* Bridge Token Box */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <KeyRound size={13} style={{ color: '#45e0ad' }} />
+              <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 600 }}>
+                Bridge Token Pribadi Anda (Wajib Diinput di EA):
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type="text"
+                readOnly
+                value={tokenLoading ? 'Memuat token...' : bridgeToken}
+                placeholder="tg_live_..."
+                style={{
+                  flex: 1,
+                  background: '#0a1419',
+                  border: '1px solid rgba(69, 224, 173, 0.4)',
+                  borderRadius: '8px',
+                  color: '#45e0ad',
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  padding: '8px 12px'
+                }}
+              />
+              <button
+                type="button"
+                className="btn alt"
+                onClick={handleCopyToken}
+                disabled={!bridgeToken}
+                style={{ fontSize: '11px', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '5px' }}
+              >
+                {copiedToken ? <Check size={14} style={{ color: '#45e0ad' }} /> : <Copy size={14} />}
+                <span>{copiedToken ? 'Tersalin' : 'Copy'}</span>
+              </button>
+            </div>
+            <span style={{ fontSize: '10px', color: '#8899a6' }}>
+              Rahasiakan token ini. Token ini mengidentifikasi MT5 laptop Anda ke akun TradeGear Anda.
+            </span>
           </div>
 
           {/* Target Backend Endpoint */}
@@ -171,16 +239,16 @@ export default function Mt5ConnectModal({
             <div className="mt5-step-card">
               <div className="mt5-step-number">3</div>
               <div className="mt5-step-content">
-                <strong>Pasang BridgeEA pada Chart</strong>
+                <strong>Pasang BridgeEA pada Chart & Masukkan Token</strong>
                 <p>
-                  Drag <code>BridgeEA</code> ke chart aktif (cth: XAUUSD M15). Pada tab <em>Common</em>, centang <strong>Allow Algo Trading</strong> (Pure WebRequest, siap untuk MQL5 VPS tanpa perlu DLL).
+                  Drag <code>BridgeEA</code> ke chart aktif (cth: XAUUSD M15). Pada tab <em>Inputs</em>, isi parameter <code>InpBridgeToken</code> dengan token pribadi Anda di atas. Pada tab <em>Common</em>, centang <strong>Allow Algo Trading</strong>.
                 </p>
               </div>
             </div>
           </div>
 
           <p className="mt5-success-note">
-            💡 Status di dashboard ini akan otomatis menyala <strong>CONNECTED (HIJAU)</strong> dan menampilkan saldo, posisi aktif, dan riwayat secara langsung dari laptop Anda.
+            💡 Status di dashboard ini akan otomatis menyala <strong>CONNECTED (HIJAU)</strong> dan menampilkan saldo, posisi aktif, dan riwayat secara langsung dan privat hanya untuk akun Anda.
           </p>
         </div>
 

@@ -1,124 +1,140 @@
 import time
 import threading
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Dict
 from fastapi import HTTPException, status
 from app.core.config import settings
 from app.models.autopilot import AutoPilotStatusResponse
-from app.services.bridge_service import bridge_service
+
+
+class UserAutoPilotState:
+    def __init__(self, username: str):
+        self.username = username
+        self.is_autopilot_active: bool = settings.AUTOPILOT_DEFAULT_ENABLED
+        self.is_drawdown_lockout_active: bool = False
+        self.drawdown_lockout_reason: Optional[str] = None
+        self.drawdown_lockout_time: Optional[int] = None
+        self.starting_equity: Optional[float] = None
+        self.closed_daily_pnl: float = 0.0
+        self.last_reset_date: str = ""
+        self.auto_executed_count: int = 0
 
 
 class AutoPilotService:
     def __init__(self):
         self._lock = threading.Lock()
-        self._is_autopilot_active: bool = settings.AUTOPILOT_DEFAULT_ENABLED
-        self._is_drawdown_lockout_active: bool = False
-        self._drawdown_lockout_reason: Optional[str] = None
-        self._drawdown_lockout_time: Optional[int] = None
-        self._starting_equity: Optional[float] = None
-        self._closed_daily_pnl: float = 0.0
-        self._last_reset_date: str = ""
-        self._auto_executed_count: int = 0
+        self._states: Dict[str, UserAutoPilotState] = {}
+
+    def _get_state(self, username: Optional[str]) -> UserAutoPilotState:
+        key = (username or settings.ADMIN_USERNAME).strip().lower()
+        if key not in self._states:
+            self._states[key] = UserAutoPilotState(username=key)
+        return self._states[key]
 
     def reset_state(self):
         """Reset internal state for unit test isolation."""
         with self._lock:
-            self._is_autopilot_active = settings.AUTOPILOT_DEFAULT_ENABLED
-            self._is_drawdown_lockout_active = False
-            self._drawdown_lockout_reason = None
-            self._drawdown_lockout_time = None
-            self._starting_equity = None
-            self._closed_daily_pnl = 0.0
-            self._last_reset_date = ""
-            self._auto_executed_count = 0
+            self._states.clear()
 
-    def _check_day_rollover(self, current_equity: float):
+    def _check_day_rollover(self, state: UserAutoPilotState, current_equity: float):
         """Reset daily tracking at 00:00 UTC."""
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if not self._last_reset_date:
-            self._last_reset_date = today_str
-            if self._starting_equity is None and current_equity > 0:
-                self._starting_equity = current_equity
+        if not state.last_reset_date:
+            state.last_reset_date = today_str
+            if state.starting_equity is None and current_equity > 0:
+                state.starting_equity = current_equity
             return
 
-        if self._last_reset_date != today_str:
-            self._last_reset_date = today_str
-            self._closed_daily_pnl = 0.0
+        if state.last_reset_date != today_str:
+            state.last_reset_date = today_str
+            state.closed_daily_pnl = 0.0
             # Auto-reset drawdown lockout on new trading day
-            self._is_drawdown_lockout_active = False
-            self._drawdown_lockout_reason = None
-            self._drawdown_lockout_time = None
+            state.is_drawdown_lockout_active = False
+            state.drawdown_lockout_reason = None
+            state.drawdown_lockout_time = None
             if current_equity > 0:
-                self._starting_equity = current_equity
+                state.starting_equity = current_equity
 
-    def record_closed_trade(self, pnl: float):
+    def record_closed_trade(self, pnl: float, username: Optional[str] = None):
         with self._lock:
-            self._closed_daily_pnl += pnl
+            st = self._get_state(username)
+            st.closed_daily_pnl += pnl
 
-    def set_starting_equity_baseline(self, equity: float):
+    def set_starting_equity_baseline(self, equity: float, username: Optional[str] = None):
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         with self._lock:
+            st = self._get_state(username)
             if equity > 0:
-                self._starting_equity = equity
-                self._last_reset_date = today_str
+                st.starting_equity = equity
+                st.last_reset_date = today_str
 
-    def ensure_active_on_connect(self):
+    def ensure_active_on_connect(self, username: Optional[str] = None):
         """Automatically engage AutoPilot whenever MT5 terminal connects, provided Drawdown Guard is not locked."""
-        bridge_status = bridge_service.get_status()
+        from app.services.bridge_service import bridge_service
+        user_key = (username or settings.ADMIN_USERNAME).strip().lower()
+        bridge_status = bridge_service.get_status(username=user_key)
         with self._lock:
-            if not self._is_drawdown_lockout_active and not bridge_status.is_kill_switch_active:
-                self._is_autopilot_active = True
+            st = self._get_state(user_key)
+            if not st.is_drawdown_lockout_active and not bridge_status.is_kill_switch_active:
+                st.is_autopilot_active = True
 
-    def is_autopilot_active(self) -> bool:
-        bridge_status = bridge_service.get_status()
+    def is_autopilot_active(self, username: Optional[str] = None) -> bool:
+        from app.services.bridge_service import bridge_service
+        user_key = (username or settings.ADMIN_USERNAME).strip().lower()
+        bridge_status = bridge_service.get_status(username=user_key)
         with self._lock:
-            if bridge_status.is_connected and not self._is_drawdown_lockout_active and not bridge_status.is_kill_switch_active:
-                self._is_autopilot_active = True
-            return self._is_autopilot_active and not self._is_drawdown_lockout_active
+            st = self._get_state(user_key)
+            if bridge_status.is_connected and not st.is_drawdown_lockout_active and not bridge_status.is_kill_switch_active:
+                st.is_autopilot_active = True
+            return st.is_autopilot_active and not st.is_drawdown_lockout_active
 
-    def is_drawdown_locked(self) -> bool:
+    def is_drawdown_locked(self, username: Optional[str] = None) -> bool:
         with self._lock:
-            return self._is_drawdown_lockout_active
+            return self._get_state(username).is_drawdown_lockout_active
 
-    def increment_auto_executed_count(self):
+    def increment_auto_executed_count(self, username: Optional[str] = None):
         with self._lock:
-            self._auto_executed_count += 1
+            self._get_state(username).auto_executed_count += 1
 
     def toggle_autopilot(self, enabled: bool, username: str = "admin") -> dict:
-        bridge_status = bridge_service.get_status()
+        from app.services.bridge_service import bridge_service
+        user_key = (username or settings.ADMIN_USERNAME).strip().lower()
+        bridge_status = bridge_service.get_status(username=user_key)
 
         with self._lock:
+            st = self._get_state(user_key)
             if enabled:
-                if self._is_drawdown_lockout_active:
+                if st.is_drawdown_lockout_active:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
-                        detail=f"Cannot engage Auto-Pilot: System is locked by Daily Drawdown Guard ({self._drawdown_lockout_reason})."
+                        detail=f"Cannot engage Auto-Pilot: System is locked by Daily Drawdown Guard ({st.drawdown_lockout_reason})."
                     )
                 if bridge_status.is_kill_switch_active:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="Cannot engage Auto-Pilot: Emergency Kill Switch is currently active."
                     )
-                self._is_autopilot_active = True
+                st.is_autopilot_active = True
                 msg = "Autonomous Auto-Pilot mode ENGAGED. Strategy confluence signals will execute automatically."
             else:
-                self._is_autopilot_active = False
+                st.is_autopilot_active = False
                 msg = "Autonomous Auto-Pilot mode DISENGAGED. Robot switched to standby / observing mode."
 
         return {
             "status": "success",
-            "is_autopilot_active": self._is_autopilot_active,
+            "is_autopilot_active": st.is_autopilot_active,
             "message": msg,
             "toggled_by": username
         }
 
     def reset_drawdown_lockout(self, new_baseline: Optional[float] = None, username: str = "admin") -> dict:
         with self._lock:
-            self._is_drawdown_lockout_active = False
-            self._drawdown_lockout_reason = None
-            self._drawdown_lockout_time = None
+            st = self._get_state(username)
+            st.is_drawdown_lockout_active = False
+            st.drawdown_lockout_reason = None
+            st.drawdown_lockout_time = None
             if new_baseline and new_baseline > 0:
-                self._starting_equity = new_baseline
+                st.starting_equity = new_baseline
 
         return {
             "status": "reset",
@@ -127,8 +143,10 @@ class AutoPilotService:
             "unlocked_by": username
         }
 
-    def get_status(self) -> AutoPilotStatusResponse:
-        bridge_status = bridge_service.get_status()
+    def get_status(self, username: Optional[str] = None) -> AutoPilotStatusResponse:
+        from app.services.bridge_service import bridge_service
+        user_key = (username or settings.ADMIN_USERNAME).strip().lower()
+        bridge_status = bridge_service.get_status(username=user_key)
         metrics = bridge_status.metrics
 
         live_equity = metrics.equity if (metrics and metrics.equity > 0) else 10000.0
@@ -137,61 +155,66 @@ class AutoPilotService:
         current_time = int(time.time())
 
         with self._lock:
-            if bridge_status.is_connected and not self._is_drawdown_lockout_active and not bridge_status.is_kill_switch_active:
-                self._is_autopilot_active = True
+            st = self._get_state(user_key)
+            if bridge_status.is_connected and not st.is_drawdown_lockout_active and not bridge_status.is_kill_switch_active:
+                st.is_autopilot_active = True
 
-            self._check_day_rollover(live_equity)
+            self._check_day_rollover(st, live_equity)
 
-            if self._starting_equity is None or self._starting_equity <= 0:
-                self._starting_equity = live_equity
+            baseline = st.starting_equity or live_equity
+            daily_loss_amount = baseline - live_equity
+            daily_dd_pct = round((daily_loss_amount / baseline) * 100.0, 2) if baseline > 0 else 0.0
+            daily_dd_pct = max(0.0, daily_dd_pct)
 
-            baseline = self._starting_equity
-            closed_pnl = self._closed_daily_pnl
-            total_pnl = round(closed_pnl + floating_pnl, 2)
-
-            # Drawdown relative to starting baseline
-            if live_equity < baseline:
-                dd_amount = round(baseline - live_equity, 2)
-                dd_percent = round((dd_amount / baseline) * 100.0, 2)
-            else:
-                dd_amount = 0.0
-                dd_percent = 0.0
-
-            # Guard Breach Evaluation: Trigger lockout if drawdown exceeds maximum allowable limit
-            if dd_percent >= settings.MAX_DAILY_DRAWDOWN_PERCENT and not self._is_drawdown_lockout_active:
-                self._is_drawdown_lockout_active = True
-                self._is_autopilot_active = False  # Auto shut-off autopilot
-                self._drawdown_lockout_time = current_time
-                self._drawdown_lockout_reason = (
-                    f"Daily Drawdown Breach: -{dd_percent:.2f}% equity loss exceeds maximum allowed safety threshold of {settings.MAX_DAILY_DRAWDOWN_PERCENT:.1f}%."
-                )
-
-                # Dispatch Telegram alert
-                try:
-                    from app.services.telegram_service import telegram_service
-                    telegram_service.send_drawdown_lockout_alert_background(
-                        drawdown_percent=dd_percent,
-                        drawdown_amount=dd_amount,
-                        limit_percent=settings.MAX_DAILY_DRAWDOWN_PERCENT
-                    )
-                except Exception:
-                    pass
+            max_allowed = settings.MAX_DAILY_DRAWDOWN_PERCENT
+            closed_pnl = round(st.closed_daily_pnl, 2)
+            flt_pnl = round(floating_pnl, 2)
+            tot_pnl = round(closed_pnl + flt_pnl, 2)
+            daily_dd_amt = round(max(0.0, daily_loss_amount), 2)
 
             return AutoPilotStatusResponse(
-                is_autopilot_active=self._is_autopilot_active and not self._is_drawdown_lockout_active,
-                is_drawdown_lockout_active=self._is_drawdown_lockout_active,
-                drawdown_lockout_reason=self._drawdown_lockout_reason,
-                lockout_time=self._drawdown_lockout_time,
+                is_autopilot_active=st.is_autopilot_active and not st.is_drawdown_lockout_active,
+                is_drawdown_lockout_active=st.is_drawdown_lockout_active,
+                drawdown_lockout_reason=st.drawdown_lockout_reason,
+                lockout_time=st.drawdown_lockout_time,
                 starting_equity=round(baseline, 2),
                 current_equity=round(live_equity, 2),
-                closed_daily_pnl=round(closed_pnl, 2),
-                floating_pnl=round(floating_pnl, 2),
-                total_daily_pnl=total_pnl,
-                daily_drawdown_amount=dd_amount,
-                daily_drawdown_percent=dd_percent,
-                max_daily_drawdown_percent=settings.MAX_DAILY_DRAWDOWN_PERCENT,
-                auto_executed_signals_count=self._auto_executed_count
+                closed_daily_pnl=closed_pnl,
+                floating_pnl=flt_pnl,
+                total_daily_pnl=tot_pnl,
+                daily_drawdown_amount=daily_dd_amt,
+                daily_drawdown_percent=daily_dd_pct,
+                max_daily_drawdown_percent=max_allowed,
+                auto_executed_signals_count=st.auto_executed_count
             )
+
+    def check_drawdown(self, current_equity: float, floating_pnl: float = 0.0, username: Optional[str] = None) -> bool:
+        """Evaluate daily drawdown against threshold and lock out trading if breached."""
+        user_key = (username or settings.ADMIN_USERNAME).strip().lower()
+        with self._lock:
+            st = self._get_state(user_key)
+            self._check_day_rollover(st, current_equity)
+
+            if st.starting_equity is None or st.starting_equity <= 0:
+                st.starting_equity = current_equity
+                return False
+
+            baseline = st.starting_equity
+            daily_loss = baseline - current_equity
+            daily_dd_pct = (daily_loss / baseline) * 100.0 if baseline > 0 else 0.0
+
+            if daily_dd_pct >= settings.MAX_DAILY_DRAWDOWN_PERCENT:
+                if not st.is_drawdown_lockout_active:
+                    st.is_drawdown_lockout_active = True
+                    st.is_autopilot_active = False
+                    st.drawdown_lockout_time = int(time.time())
+                    st.drawdown_lockout_reason = (
+                        f"Daily Drawdown Guard breached: {daily_dd_pct:.2f}% loss exceeds "
+                        f"max allowable limit of {settings.MAX_DAILY_DRAWDOWN_PERCENT:.1f}%. "
+                        f"Starting baseline: ${baseline:.2f}, Current equity: ${current_equity:.2f}."
+                    )
+                    return True
+            return False
 
 
 autopilot_service = AutoPilotService()

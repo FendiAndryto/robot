@@ -22,9 +22,21 @@ def clean_state():
     autopilot_service.reset_state()
 
 
-def get_auth_headers(username: str = "admin") -> dict:
-    token = create_access_token(subject=username)
-    return {"Authorization": f"Bearer {token}"}
+from app.services.user_service import user_service
+from app.core.config import settings
+
+
+def get_auth_context(username: str = settings.ADMIN_USERNAME):
+    user = user_service.get_user(username)
+    if not user:
+        user = user_service.register(username, "AdminPassword123!")
+    token = create_access_token(user["username"], user.get("token_version", 1))
+    return {"Authorization": f"Bearer {token}"}, user["bridge_token"]
+
+
+def get_auth_headers(username: str = settings.ADMIN_USERNAME) -> dict:
+    headers, _ = get_auth_context(username)
+    return headers
 
 
 def test_calculate_ema_math():
@@ -116,7 +128,7 @@ def test_generate_test_signal_and_list():
 
 
 def test_approve_signal_disabled_on_api_and_works_internally():
-    auth_headers = get_auth_headers("admin")
+    auth_headers, bridge_token = get_auth_context("admin")
 
     # 1. Create a test signal
     gen_resp = client.post("/api/v1/strategy/generate-test-signal", json={
@@ -138,7 +150,7 @@ def test_approve_signal_disabled_on_api_and_works_internally():
 
     # 3. Strategy engine internally can auto-execute the signal (as AutoPilot does)
     from app.services.strategy_engine import strategy_engine
-    exec_res = strategy_engine.approve_signal(signal_id=signal_id, custom_lot=0.25)
+    exec_res = strategy_engine.approve_signal(signal_id=signal_id, custom_lot=0.25, username="admin")
     assert exec_res["status"] == "approved"
     assert exec_res["signal"].status == "APPROVED"
 
@@ -149,6 +161,7 @@ def test_approve_signal_disabled_on_api_and_works_internally():
         "currency": "USD",
         "balance": 10000.0,
         "equity": 10000.0,
+        "bridge_token": bridge_token,
         "timestamp": int(time.time())
     })
     assert hb_resp.status_code == 200

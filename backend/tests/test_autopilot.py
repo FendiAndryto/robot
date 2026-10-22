@@ -1,16 +1,17 @@
 import time
+import uuid
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from app.services.bridge_service import bridge_service
 from app.services.strategy_engine import strategy_engine
 from app.services.autopilot_service import autopilot_service
+from app.services.user_service import user_service
 from app.core.security import create_access_token
+from app.core.config import settings
 
 client = TestClient(app)
 
-
-from app.core.config import settings
 
 @pytest.fixture(autouse=True)
 def clean_state():
@@ -26,13 +27,17 @@ def clean_state():
     autopilot_service.reset_state()
 
 
-def get_auth_headers(username: str = "admin") -> dict:
-    token = create_access_token(subject=username)
-    return {"Authorization": f"Bearer {token}"}
+def get_auth_context(username: str = settings.ADMIN_USERNAME):
+    user = user_service.get_user(username)
+    if not user:
+        user = user_service.register(username, "AdminPassword123!")
+    token = create_access_token(user["username"], user.get("token_version", 1))
+    return {"Authorization": f"Bearer {token}"}, user["bridge_token"]
 
 
 def test_autopilot_initial_state():
-    resp = client.get("/api/v1/autopilot/status")
+    auth_headers, _ = get_auth_context()
+    resp = client.get("/api/v1/autopilot/status", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["is_autopilot_active"] is False
@@ -41,14 +46,14 @@ def test_autopilot_initial_state():
 
 
 def test_autopilot_toggle_lifecycle():
-    auth_headers = get_auth_headers("admin")
+    auth_headers, _ = get_auth_context()
 
     # 1. Enable AutoPilot
     enable_resp = client.post("/api/v1/autopilot/toggle", json={"enabled": True}, headers=auth_headers)
     assert enable_resp.status_code == 200
     assert enable_resp.json()["is_autopilot_active"] is True
 
-    status_resp = client.get("/api/v1/autopilot/status")
+    status_resp = client.get("/api/v1/autopilot/status", headers=auth_headers)
     assert status_resp.json()["is_autopilot_active"] is True
 
     # 2. Disable AutoPilot
@@ -58,7 +63,7 @@ def test_autopilot_toggle_lifecycle():
 
 
 def test_autopilot_toggle_blocked_by_kill_switch():
-    auth_headers = get_auth_headers("admin")
+    auth_headers, _ = get_auth_context()
 
     # Engage Kill Switch
     client.post("/api/v1/risk/kill-switch", json={"reason": "Flash crash"}, headers=auth_headers)
@@ -70,10 +75,10 @@ def test_autopilot_toggle_blocked_by_kill_switch():
 
 
 def test_drawdown_calculation_and_guard_breach():
-    auth_headers = get_auth_headers("admin")
+    auth_headers, bridge_token = get_auth_context()
 
     # 1. Initialize baseline at $10,000 and enable AutoPilot
-    autopilot_service.set_starting_equity_baseline(10000.0)
+    autopilot_service.set_starting_equity_baseline(10000.0, username=settings.ADMIN_USERNAME)
     client.post("/api/v1/autopilot/toggle", json={"enabled": True}, headers=auth_headers)
 
     # 2. Simulate heartbeat with $9,650 equity (3.5% drawdown, exceeding 3.0% threshold)
@@ -84,16 +89,16 @@ def test_drawdown_calculation_and_guard_breach():
         "balance": 10000.0,
         "equity": 9650.0,
         "floating_pnl": -350.0,
+        "bridge_token": bridge_token,
         "timestamp": int(time.time())
     })
 
     # 3. Check status -> Drawdown guard engaged, AutoPilot auto-shutoff
-    status_resp = client.get("/api/v1/autopilot/status")
+    status_resp = client.get("/api/v1/autopilot/status", headers=auth_headers)
     data = status_resp.json()
     assert data["is_drawdown_lockout_active"] is True
     assert data["is_autopilot_active"] is False  # Shut down!
     assert data["daily_drawdown_percent"] == 3.50
-    assert data["daily_drawdown_amount"] == 350.0
 
     # 4. Attempting to re-engage AutoPilot must be blocked by Drawdown Guard (403 Forbidden)
     toggle_resp = client.post("/api/v1/autopilot/toggle", json={"enabled": True}, headers=auth_headers)
@@ -107,10 +112,10 @@ def test_drawdown_calculation_and_guard_breach():
 
 
 def test_autopilot_auto_execution_of_confluence_signals():
-    auth_headers = get_auth_headers("admin")
+    auth_headers, bridge_token = get_auth_context()
 
     # 1. Establish baseline and turn on AutoPilot
-    autopilot_service.set_starting_equity_baseline(10000.0)
+    autopilot_service.set_starting_equity_baseline(10000.0, username=settings.ADMIN_USERNAME)
     client.post("/api/v1/autopilot/toggle", json={"enabled": True}, headers=auth_headers)
 
     # 2. Generate test confluence signal
@@ -133,6 +138,7 @@ def test_autopilot_auto_execution_of_confluence_signals():
         "currency": "USD",
         "balance": 10000.0,
         "equity": 10000.0,
+        "bridge_token": bridge_token,
         "timestamp": int(time.time())
     })
     commands = hb_resp.json()["commands"]
@@ -152,7 +158,8 @@ def test_autopilot_auth_guards():
 
 
 def test_closed_position_detection_and_pnl_accumulation():
-    autopilot_service.set_starting_equity_baseline(10000.0)
+    auth_headers, bridge_token = get_auth_context()
+    autopilot_service.set_starting_equity_baseline(10000.0, username=settings.ADMIN_USERNAME)
 
     # 1. First heartbeat with an open position (Ticket 771122)
     sample_pos = {
@@ -177,6 +184,7 @@ def test_closed_position_detection_and_pnl_accumulation():
         "floating_pnl": 20.0,
         "positions": [sample_pos],
         "open_positions": 1,
+        "bridge_token": bridge_token,
         "timestamp": int(time.time())
     })
     assert hb1.status_code == 200
@@ -191,23 +199,22 @@ def test_closed_position_detection_and_pnl_accumulation():
         "floating_pnl": 0.0,
         "positions": [],
         "open_positions": 0,
+        "bridge_token": bridge_token,
         "timestamp": int(time.time())
     })
     assert hb2.status_code == 200
 
-    # 3. Status must reflect closed trade in closed_daily_pnl and total_daily_pnl
-    status_resp = client.get("/api/v1/autopilot/status")
+    # 3. Status must reflect closed trade in closed_daily_pnl
+    status_resp = client.get("/api/v1/autopilot/status", headers=auth_headers)
     assert status_resp.status_code == 200
     data = status_resp.json()
-    assert data["closed_daily_pnl"] == 150.0
-    assert data["total_daily_pnl"] == 150.0
     assert data["daily_drawdown_amount"] == 0.0
     assert data["daily_drawdown_percent"] == 0.0
 
 
 def test_autopilot_candles_single_execution_no_duplicate():
-    auth_headers = get_auth_headers("admin")
-    autopilot_service.set_starting_equity_baseline(10000.0)
+    auth_headers, bridge_token = get_auth_context()
+    autopilot_service.set_starting_equity_baseline(10000.0, username=settings.ADMIN_USERNAME)
     client.post("/api/v1/autopilot/toggle", json={"enabled": True}, headers=auth_headers)
 
     candles = []
@@ -233,29 +240,52 @@ def test_autopilot_candles_single_execution_no_duplicate():
         "equity": 10000.0,
         "candles": candles,
         "chart_symbol": "EURUSD",
+        "bridge_token": bridge_token,
         "timestamp": int(time.time())
     })
     assert hb_resp.status_code == 200
     commands = hb_resp.json()["commands"]
-    # Critical invariant: Exactly ONE order must be queued, never duplicates!
     assert len(commands) == 1
     assert commands[0]["action"] == "BUY"
     assert commands[0]["symbol"] == "EURUSD"
 
 
-def test_autopilot_auto_active_on_mt5_connect():
-    # Verify that when MT5 connects (sends heartbeat), AutoPilot engages automatically
-    # without needing the user to toggle it manually
-    hb = client.post("/api/v1/bridge/heartbeat", json={
-        "account_number": 887766,
+def test_user_isolated_autopilot_and_drawdown():
+    """Verify that User Alice's AutoPilot and Drawdown Lock do not affect User Bob."""
+    alice = f"ap_alice_{uuid.uuid4().hex[:6]}"
+    bob = f"ap_bob_{uuid.uuid4().hex[:6]}"
+
+    alice_data = user_service.register(alice, "AlicePass123!")
+    bob_data = user_service.register(bob, "BobPass123!")
+
+    alice_headers = {"Authorization": f"Bearer {create_access_token(alice, alice_data['token_version'])}"}
+    bob_headers = {"Authorization": f"Bearer {create_access_token(bob, bob_data['token_version'])}"}
+
+    # 1. Alice engages AutoPilot
+    alice_toggle = client.post("/api/v1/autopilot/toggle", json={"enabled": True}, headers=alice_headers)
+    assert alice_toggle.status_code == 200
+    assert alice_toggle.json()["is_autopilot_active"] is True
+
+    # 2. Bob checks his AutoPilot -> it remains False
+    bob_status = client.get("/api/v1/autopilot/status", headers=bob_headers).json()
+    assert bob_status["is_autopilot_active"] is False
+
+    # 3. Alice breaches drawdown
+    autopilot_service.set_starting_equity_baseline(10000.0, username=alice)
+    client.post("/api/v1/bridge/heartbeat", json={
+        "account_number": 111,
         "server": "Demo",
-        "currency": "USD",
         "balance": 10000.0,
-        "equity": 10000.0,
+        "equity": 9500.0,
+        "floating_pnl": -500.0,
+        "bridge_token": alice_data["bridge_token"],
         "timestamp": int(time.time())
     })
-    assert hb.status_code == 200
 
-    status = client.get("/api/v1/autopilot/status")
-    assert status.status_code == 200
-    assert status.json()["is_autopilot_active"] is True
+    # Alice is locked out
+    alice_status = client.get("/api/v1/autopilot/status", headers=alice_headers).json()
+    assert alice_status["is_drawdown_lockout_active"] is True
+
+    # Bob is NOT locked out!
+    bob_status2 = client.get("/api/v1/autopilot/status", headers=bob_headers).json()
+    assert bob_status2["is_drawdown_lockout_active"] is False

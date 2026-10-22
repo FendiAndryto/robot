@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   LogOut,
   ShieldAlert,
@@ -12,7 +12,10 @@ import {
   Eye,
   EyeOff,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Copy,
+  Check,
+  RefreshCw
 } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -54,6 +57,54 @@ export default function ProfileTab({
   const startingEquity = autopilotStatus?.starting_equity ?? metrics.equity ?? 10000;
   const limitUsed = maxDrawdownPercent > 0 ? Math.min(100, (dailyDrawdownPercent / maxDrawdownPercent) * 100) : 0;
 
+  // Bridge Token state
+  const [bridgeToken, setBridgeToken] = useState(user?.bridge_token || '');
+  const [showToken, setShowToken] = useState(false);
+  const [copiedToken, setCopiedToken] = useState(false);
+  const [isRegeneratingToken, setIsRegeneratingToken] = useState(false);
+  const [tokenMsg, setTokenMsg] = useState(null);
+
+  useEffect(() => {
+    if (!bridgeToken) {
+      api.getBridgeToken()
+        .then(data => {
+          if (data?.bridge_token) {
+            setBridgeToken(data.bridge_token);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [bridgeToken]);
+
+  const handleCopyToken = () => {
+    if (!bridgeToken) return;
+    navigator.clipboard.writeText(bridgeToken);
+    setCopiedToken(true);
+    setTimeout(() => setCopiedToken(false), 2000);
+  };
+
+  const handleRegenerateToken = async () => {
+    const confirmed = window.confirm(
+      'Peringatan: Membuat Bridge Token baru akan membatalkan token lama seketika. ' +
+      'Terminal MT5 yang sedang terhubung akan terputus hingga Anda memasukkan token baru di EA. Lanjutkan?'
+    );
+    if (!confirmed) return;
+
+    setIsRegeneratingToken(true);
+    setTokenMsg(null);
+    try {
+      const data = await api.regenerateBridgeToken();
+      if (data?.bridge_token) {
+        setBridgeToken(data.bridge_token);
+        setTokenMsg({ type: 'success', text: 'Bridge Token baru berhasil dibuat! Masukkan ke input InpBridgeToken di MT5 EA Anda.' });
+      }
+    } catch (err) {
+      setTokenMsg({ type: 'error', text: err.message || 'Gagal membuat token baru.' });
+    } finally {
+      setIsRegeneratingToken(false);
+    }
+  };
+
   // Change password state
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -72,8 +123,13 @@ export default function ProfileTab({
       return;
     }
 
-    if (newPassword.length < 4) {
-      setPassFeedback({ type: 'error', text: 'Password baru minimal 4 karakter.' });
+    if (newPassword.length < 8) {
+      setPassFeedback({ type: 'error', text: 'Password baru minimal 8 karakter.' });
+      return;
+    }
+
+    if (!/[a-zA-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      setPassFeedback({ type: 'error', text: 'Password baru wajib berisi kombinasi huruf dan angka.' });
       return;
     }
 
@@ -85,7 +141,10 @@ export default function ProfileTab({
     setIsChangingPass(true);
     try {
       const res = await api.changePassword(oldPassword, newPassword);
-      setPassFeedback({ type: 'success', text: res.message || 'Password berhasil diperbarui!' });
+      setPassFeedback({
+        type: 'success',
+        text: res.message || 'Password berhasil diperbarui! Seluruh sesi aktif lama telah dicabut demi keamanan.'
+      });
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
@@ -102,7 +161,7 @@ export default function ProfileTab({
         <div>
           <div className="eyebrow">ACCOUNT & PREFERENCES</div>
           <h1>Profile & Engine Security</h1>
-          <div className="sub">Kelola koneksi MT5, batas drawdown, keamanan Kill Switch, dan akun.</div>
+          <div className="sub">Kelola koneksi privat MT5, kredensial Bridge, batas drawdown, dan akun.</div>
         </div>
         <button
           type="button"
@@ -143,6 +202,98 @@ export default function ProfileTab({
         </div>
       </div>
 
+      {/* Bridge MT5 Private Credentials */}
+      <div className="section" style={{ fontSize: '14px', fontWeight: 800, marginBottom: '10px' }}>
+        Kredensial Bridge MT5 Pribadi
+      </div>
+
+      <div className="card" style={{ marginBottom: '20px' }}>
+        <div className="cardhead">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <KeyRound size={17} style={{ color: 'var(--g)' }} />
+            <h3>Bridge Token Pribadi (InpBridgeToken)</h3>
+          </div>
+          <span className="tag green">PRIVATE ACCESS</span>
+        </div>
+
+        <p className="sub" style={{ fontSize: '11.5px', marginBottom: '14px', lineHeight: 1.45 }}>
+          Token ini memastikan terminal MT5 di laptop Anda terhubung secara eksklusif ke akun Anda. Pengguna lain tidak akan dapat melihat saldo atau order Anda.
+        </p>
+
+        {tokenMsg && (
+          <div
+            style={{
+              padding: '9px 12px',
+              borderRadius: '9px',
+              fontSize: '11.5px',
+              marginBottom: '14px',
+              background: tokenMsg.type === 'success' ? 'rgba(69, 224, 173, 0.12)' : 'rgba(255, 113, 128, 0.12)',
+              border: `1px solid ${tokenMsg.type === 'success' ? 'rgba(69, 224, 173, 0.4)' : 'rgba(255, 113, 128, 0.4)'}`,
+              color: tokenMsg.type === 'success' ? 'var(--g)' : 'var(--red)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}
+          >
+            {tokenMsg.type === 'success' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
+            <span>{tokenMsg.text}</span>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+          <input
+            type={showToken ? 'text' : 'password'}
+            readOnly
+            value={bridgeToken || 'Memuat token...'}
+            style={{
+              flex: 1,
+              background: '#0a1419',
+              border: '1px solid rgba(69, 224, 173, 0.35)',
+              borderRadius: '8px',
+              color: '#45e0ad',
+              fontFamily: 'monospace',
+              fontSize: '12px',
+              fontWeight: 600,
+              padding: '9px 12px',
+              letterSpacing: showToken ? 'normal' : '2px'
+            }}
+          />
+          <button
+            type="button"
+            className="btn alt"
+            onClick={() => setShowToken(!showToken)}
+            style={{ padding: '8px 12px' }}
+            title={showToken ? 'Sembunyikan Token' : 'Tampilkan Token'}
+          >
+            {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+          <button
+            type="button"
+            className="btn alt"
+            onClick={handleCopyToken}
+            disabled={!bridgeToken}
+            style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            {copiedToken ? <Check size={14} style={{ color: '#45e0ad' }} /> : <Copy size={14} />}
+            <span>{copiedToken ? 'Tersalin' : 'Copy'}</span>
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            className="btn alt"
+            onClick={handleRegenerateToken}
+            disabled={isRegeneratingToken}
+            style={{ fontSize: '11px', padding: '6px 12px', color: '#ffb366' }}
+            title="Generate ulang token jika dicurigai bocor"
+          >
+            <RefreshCw size={12} className={isRegeneratingToken ? 'animate-spin' : ''} />
+            <span>{isRegeneratingToken ? 'Generating...' : 'Regenerate Token Baru'}</span>
+          </button>
+        </div>
+      </div>
+
       {/* Account Security & Password Management */}
       <div className="section" style={{ fontSize: '14px', fontWeight: 800, marginBottom: '10px' }}>
         Keamanan Akun & Password
@@ -158,7 +309,7 @@ export default function ProfileTab({
         </div>
 
         <p className="sub" style={{ fontSize: '11.5px', marginBottom: '14px', lineHeight: 1.45 }}>
-          Perbarui kata sandi akun Anda untuk menjaga keamanan akses ke MT5 Execution Engine dan dashboard.
+          Perbarui kata sandi akun Anda (minimal 8 karakter dengan kombinasi huruf dan angka). Mengganti password akan otomatis mencabut seluruh sesi login lama di perangkat lain.
         </p>
 
         {passFeedback && (
@@ -216,14 +367,14 @@ export default function ProfileTab({
             </div>
 
             <div>
-              <label className="label" style={{ display: 'block' }}>Password Baru</label>
+              <label className="label" style={{ display: 'block' }}>Password Baru (Min 8 Karakter)</label>
               <div style={{ position: 'relative' }}>
                 <Lock size={14} style={{ position: 'absolute', left: '10px', top: '10px', color: 'var(--muted)' }} />
                 <input
                   type={showNewPass ? 'text' : 'password'}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Minimal 4 karakter"
+                  placeholder="Min 8 karakter alfanumerik"
                   style={{
                     width: '100%',
                     padding: '8px 32px 8px 30px',
@@ -297,7 +448,7 @@ export default function ProfileTab({
           <div className="grow">
             <div className="rowtitle">{server}</div>
             <div className="rowsub">
-              Login #{accountNumber || 'Offline'} · MT5 Linux Bridge
+              Login #{accountNumber || 'Offline'} · MT5 Direct Laptop Bridge
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -316,7 +467,7 @@ export default function ProfileTab({
               title="Buka Layar MT5 GUI"
             >
               <Monitor size={13} />
-              <span>Layar MT5</span>
+              <span>Panduan Koneksi MT5</span>
             </button>
           </div>
         </div>
@@ -378,8 +529,6 @@ export default function ProfileTab({
           </button>
         </div>
       </div>
-
-
 
       {/* Preferences & Telemetry */}
       <div className="section" style={{ fontSize: '14px', fontWeight: 800, marginBottom: '10px' }}>

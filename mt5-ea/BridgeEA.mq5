@@ -14,6 +14,7 @@
 //--- Inputs
 input group "--- Bridge Settings ---"
 input string InpBackendUrl        = "https://staging-trade-gear.homever.my.id"; // Backend API URL
+input string InpBridgeToken       = "";                                        // TradeGear Bridge Token (from Web Profile/Connect modal)
 input string InpMonitoredSymbols  = "XAUUSD,EURUSD,GBPUSD,USDJPY,BTCUSD";      // Watchlist symbols (comma-separated)
 input int    InpHistoryDays       = 30;                                        // History lookback days
 input int    InpHeartbeatInterval = 1;                                         // Heartbeat interval in seconds
@@ -880,6 +881,7 @@ string BuildHeartbeatJson()
       + "\"candles\":" + candlesM15Json + ","
       + "\"candles_m5\":" + candlesM5Json + ","
       + "\"chart_symbol\":\"" + EscapeJsonString(_Symbol) + "\","
+      + "\"bridge_token\":\"" + EscapeJsonString(InpBridgeToken) + "\","
       + StringFormat("\"timestamp\":%I64d", timestamp)
       + "}";
    
@@ -906,6 +908,10 @@ void SendHeartbeat()
    }
    
    string headers = "Content-Type: application/json\r\n";
+   if(StringLen(InpBridgeToken) > 0)
+   {
+      headers += "X-Bridge-Token: " + InpBridgeToken + "\r\n";
+   }
    ResetLastError();
    
    // 1. Try native WebRequest first
@@ -923,6 +929,18 @@ void SendHeartbeat()
       if(InpVerboseLog)
       {
          Print(">>> [BridgeEA] Heartbeat OK. Response: ", responseStr);
+      }
+      UpdateChartHUD(g_status_msg);
+      return;
+   }
+   
+   if(res == 401)
+   {
+      g_consecutive_errors++;
+      g_status_msg = "Unauthorized (Invalid/Missing Bridge Token)";
+      if(g_consecutive_errors % 5 == 1)
+      {
+         Print(">>> [BridgeEA] ERROR 401: Unauthorized! Please set valid 'InpBridgeToken' from TradeGear Web.");
       }
       UpdateChartHUD(g_status_msg);
       return;

@@ -131,6 +131,27 @@ export const api = {
     }
   },
 
+  async getBridgeToken() {
+    const res = await authFetch(`${API_BASE}/api/v1/auth/bridge-token`, {
+      method: 'GET'
+    });
+    if (!res.ok) {
+      throw new Error('Failed to retrieve bridge token');
+    }
+    return res.json();
+  },
+
+  async regenerateBridgeToken() {
+    const res = await authFetch(`${API_BASE}/api/v1/auth/bridge-token/regenerate`, {
+      method: 'POST'
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to regenerate token' }));
+      throw new Error(err.detail || 'Token regeneration failed');
+    }
+    return res.json();
+  },
+
   // Bridge Status & Telemetry
   async getBridgeStatus() {
     const res = await authFetch(`${API_BASE}/api/v1/bridge/status`, {

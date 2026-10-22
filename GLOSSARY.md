@@ -40,3 +40,18 @@ _Avoid_: Total untung, laba keseluruhan, net gain
 The chronological trajectory of account equity and balance growth reconstructed from initial balance benchmark and historical closed trades.
 _Avoid_: Grafik saldo, profit line, chart trade
 
+**TradeGear User**:
+An authenticated account holder registered in the TradeGear web application with specific roles and private resources.
+_Avoid_: Client, member, trader account
+
+**MT5 Trading Account**:
+The broker-hosted trading account running on a MetaTrader 5 terminal with capital, equity, and order execution capabilities.
+_Avoid_: Web account, profile, login ID
+
+**Bridge Token**:
+A cryptographically secure, high-entropy API authentication token assigned to a TradeGear User to authenticate and bind incoming MT5 EA telemetry.
+_Avoid_: MT5 password, broker pin, user secret
+
+**Isolated Bridge Session**:
+The strictly private runtime state (telemetry, positions, deal history, drawdown guard, and autopilot) maintained independently for each TradeGear User.
+_Avoid_: Shared telemetry, global bridge, common feed

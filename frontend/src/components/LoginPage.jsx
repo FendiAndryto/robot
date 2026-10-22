@@ -72,8 +72,13 @@ export default function LoginPage({ onLoginSuccess, sessionExpiredMsg }) {
       return;
     }
 
-    if (p.length < 4) {
-      setError('Password minimal 4 karakter.');
+    if (p.length < 8) {
+      setError('Password minimal 8 karakter.');
+      return;
+    }
+
+    if (!/[a-zA-Z]/.test(p) || !/[0-9]/.test(p)) {
+      setError('Password wajib kombinasi huruf dan angka.');
       return;
     }
 
@@ -488,7 +493,7 @@ export default function LoginPage({ onLoginSuccess, sessionExpiredMsg }) {
                   type={showRegPassword ? 'text' : 'password'}
                   value={regPassword}
                   onChange={(e) => setRegPassword(e.target.value)}
-                  placeholder="Minimal 4 karakter"
+                  placeholder="Minimal 8 karakter (huruf & angka)"
                   disabled={loading}
                   style={{
                     width: '100%',

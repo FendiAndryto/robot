@@ -9,7 +9,7 @@ from app.models.strategy import (
 )
 from app.services.strategy_engine import strategy_engine
 from app.services.bridge_service import bridge_service
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, get_optional_current_user
 
 router = APIRouter(prefix="/strategy", tags=["Strategy & Signals"])
 
@@ -61,8 +61,8 @@ async def generate_test_signal(
     req: TestSignalRequest = TestSignalRequest(),
     current_user: str = Depends(get_current_user)
 ):
-    live_equity = bridge_service.get_equity()
-    return strategy_engine.create_custom_signal(req=req, live_equity=live_equity)
+    live_equity = bridge_service.get_equity(username=current_user)
+    return strategy_engine.create_custom_signal(req=req, live_equity=live_equity, username=current_user)
 
 
 @router.post(
@@ -73,14 +73,16 @@ async def generate_test_signal(
 )
 async def evaluate_candles(
     symbol: str,
-    candles: List[CandleData]
+    candles: List[CandleData],
+    current_user: Optional[str] = Depends(get_optional_current_user)
 ):
-    live_equity = bridge_service.get_equity()
+    live_equity = bridge_service.get_equity(username=current_user)
     return strategy_engine.evaluate_candles(
         symbol=symbol,
         candles=candles,
         live_equity=live_equity,
-        ignore_session_filter=True
+        ignore_session_filter=True,
+        username=current_user
     )
 
 

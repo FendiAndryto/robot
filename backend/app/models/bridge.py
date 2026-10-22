@@ -94,6 +94,7 @@ class HeartbeatPayload(BaseModel):
     candles: List[Any] = Field(default_factory=list, description="Recent M15 candles for trend bias")
     candles_m5: List[Any] = Field(default_factory=list, description="Recent M5 candles for scalping trigger")
     chart_symbol: Optional[str] = Field(None, description="Current symbol on active MT5 chart")
+    bridge_token: Optional[str] = Field(None, description="TradeGear User Bridge Token")
     timestamp: int = Field(..., description="Unix timestamp sent from terminal")
 
 

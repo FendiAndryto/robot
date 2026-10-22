@@ -1,6 +1,6 @@
 import time
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from app.models.bridge import (
     HeartbeatPayload,
     HeartbeatResponse,
@@ -24,71 +24,78 @@ router = APIRouter(prefix="/bridge", tags=["Bridge"])
     status_code=status.HTTP_200_OK,
     summary="Receive periodic heartbeat telemetry from MT5 Bridge EA"
 )
-async def receive_heartbeat(payload: HeartbeatPayload):
-    return bridge_service.process_heartbeat(payload)
+async def receive_heartbeat(
+    payload: HeartbeatPayload,
+    x_bridge_token: Optional[str] = Header(None, alias="X-Bridge-Token")
+):
+    token = x_bridge_token or payload.bridge_token
+    return bridge_service.process_heartbeat(payload, bridge_token=token)
 
 
 @router.get(
     "/status",
     response_model=BridgeStatusResponse,
     status_code=status.HTTP_200_OK,
-    summary="Retrieve current MT5 bridge connectivity status and latest metrics"
+    summary="Retrieve current MT5 bridge connectivity status and latest metrics for current user"
 )
-async def get_bridge_status():
-    return bridge_service.get_status()
+async def get_bridge_status(current_user: str = Depends(get_current_user)):
+    return bridge_service.get_status(username=current_user)
 
 
 @router.get(
     "/initial-deposit",
     response_model=InitialDepositResponse,
     status_code=status.HTTP_200_OK,
-    summary="Get initial deposit baseline settings and all-time P/L return"
+    summary="Get initial deposit baseline settings and all-time P/L return for current user"
 )
-async def get_initial_deposit():
-    return bridge_service.get_initial_deposit_info()
+async def get_initial_deposit(current_user: str = Depends(get_current_user)):
+    return bridge_service.get_initial_deposit_info(username=current_user)
 
 
 @router.post(
     "/initial-deposit",
     response_model=InitialDepositResponse,
     status_code=status.HTTP_200_OK,
-    summary="Set or override manual initial deposit baseline (or null/0 to reset to MT5)"
+    summary="Set or override manual initial deposit baseline for current user"
 )
 async def set_initial_deposit(
     req: InitialDepositRequest,
     current_user: str = Depends(get_current_user)
 ):
-    return bridge_service.set_initial_deposit_override(req.initial_deposit)
+    return bridge_service.set_initial_deposit_override(req.initial_deposit, username=current_user)
 
 
 @router.get(
     "/history",
     response_model=TradeHistoryResponse,
     status_code=status.HTTP_200_OK,
-    summary="Retrieve real closed deals history and calculated metrics directly from MT5"
+    summary="Retrieve real closed deals history and calculated metrics directly from user's MT5"
 )
-async def get_trade_history():
-    return bridge_service.get_trade_history()
+async def get_trade_history(current_user: str = Depends(get_current_user)):
+    return bridge_service.get_trade_history(username=current_user)
 
 
 @router.get(
     "/market",
     response_model=List[MarketQuoteItem],
     status_code=status.HTTP_200_OK,
-    summary="Retrieve live quotes for monitored instruments from MT5 feed"
+    summary="Retrieve live quotes for monitored instruments from user's MT5 feed"
 )
-async def get_market_quotes():
-    return bridge_service.get_market_quotes()
+async def get_market_quotes(current_user: str = Depends(get_current_user)):
+    return bridge_service.get_market_quotes(username=current_user)
 
 
 @router.get(
     "/equity-curve",
     response_model=EquityCurveResponse,
     status_code=status.HTTP_200_OK,
-    summary="Retrieve equity snapshots over time for dynamic performance chart"
+    summary="Retrieve equity snapshots over time for dynamic performance chart for current user"
 )
-async def get_equity_curve(range: str = "1M"):
-    return bridge_service.get_equity_curve(time_range=range)
+async def get_equity_curve(
+    range: str = "1M",
+    current_user: str = Depends(get_current_user)
+):
+    return bridge_service.get_equity_curve(time_range=range, username=current_user)
 
 
 @router.post(
@@ -107,10 +114,10 @@ async def submit_order():
     "/positions",
     response_model=List[PositionItem],
     status_code=status.HTTP_200_OK,
-    summary="Retrieve currently open trading positions from MT5"
+    summary="Retrieve currently open trading positions from user's MT5"
 )
-async def get_positions():
-    return bridge_service.get_positions()
+async def get_positions(current_user: str = Depends(get_current_user)):
+    return bridge_service.get_positions(username=current_user)
 
 
 @router.get(

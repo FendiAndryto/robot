@@ -16,19 +16,20 @@ router = APIRouter(prefix="/risk", tags=["Risk Management & Safety"])
     "/calculate-lot",
     response_model=LotCalculationResponse,
     status_code=status.HTTP_200_OK,
-    summary="Calculate dynamic position size based on risk percentage and stop loss pips"
+    summary="Calculate dynamic position size based on risk percentage and stop loss pips for current user"
 )
 async def calculate_lot_size(
-    req: LotCalculationRequest
+    req: LotCalculationRequest,
+    current_user: str = Depends(get_current_user)
 ):
-    live_equity = bridge_service.get_equity()
+    live_equity = bridge_service.get_equity(current_user)
     return risk_service.calculate_lot(req, live_equity=live_equity)
 
 
 @router.post(
     "/kill-switch",
     status_code=status.HTTP_200_OK,
-    summary="Trigger emergency Kill Switch to close all open trades and disarm trading"
+    summary="Trigger emergency Kill Switch to close all open trades and disarm trading for current user"
 )
 async def trigger_kill_switch(
     payload: KillSwitchTriggerRequest,
@@ -41,7 +42,7 @@ async def trigger_kill_switch(
 @router.post(
     "/unlock",
     status_code=status.HTTP_200_OK,
-    summary="Disarm emergency Kill Switch and restore normal trading operations"
+    summary="Disarm emergency Kill Switch and restore normal trading operations for current user"
 )
 async def disarm_kill_switch(
     current_user: str = Depends(get_current_user)
@@ -53,7 +54,7 @@ async def disarm_kill_switch(
     "/status",
     response_model=KillSwitchStatusResponse,
     status_code=status.HTTP_200_OK,
-    summary="Retrieve current emergency Kill Switch state and risk parameters"
+    summary="Retrieve current emergency Kill Switch state and risk parameters for current user"
 )
-async def get_risk_status():
-    return bridge_service.get_kill_switch_status()
+async def get_risk_status(current_user: str = Depends(get_current_user)):
+    return bridge_service.get_kill_switch_status(current_user)

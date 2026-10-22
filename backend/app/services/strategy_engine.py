@@ -93,7 +93,8 @@ class StrategyEngine:
         candles_m5: Optional[List[CandleData]] = None,
         live_equity: Optional[float] = None,
         current_spread: Optional[int] = None,
-        ignore_session_filter: bool = False
+        ignore_session_filter: bool = False,
+        username: Optional[str] = None
     ) -> Optional[SignalItem]:
         if not settings.STRATEGY_ENABLED:
             return None
@@ -250,11 +251,20 @@ class StrategyEngine:
         with self._lock:
             self._signals[signal_id] = signal
 
+        # Autonomous Auto-Pilot Execution Hook
+        from app.services.autopilot_service import autopilot_service
+        is_auto_active = autopilot_service.is_autopilot_active(username=username) and not autopilot_service.is_drawdown_locked(username=username)
+        if is_auto_active:
+            try:
+                self.approve_signal(signal_id, username=username)
+                autopilot_service.increment_auto_executed_count(username=username)
+                signal.reason += " [AUTOPILOT AUTO-EXECUTED]"
+            except Exception:
+                pass
+
         # Dispatch Telegram signal alert
         try:
             from app.services.telegram_service import telegram_service
-            from app.services.autopilot_service import autopilot_service
-            is_auto_active = autopilot_service.is_autopilot_active() and not autopilot_service.is_drawdown_locked()
             telegram_service.send_signal_alert_background({
                 "action": signal.action,
                 "symbol": signal.symbol,
@@ -270,10 +280,30 @@ class StrategyEngine:
 
         return signal
 
+    def evaluate_market(
+        self,
+        symbol: str,
+        candles: List[CandleData],
+        candles_m5: Optional[List[CandleData]] = None,
+        current_spread: Optional[int] = None,
+        username: Optional[str] = None
+    ) -> Optional[SignalItem]:
+        from app.services.bridge_service import bridge_service
+        live_equity = bridge_service.get_equity(username=username)
+        return self.evaluate_candles(
+            symbol=symbol,
+            candles=candles,
+            candles_m5=candles_m5,
+            live_equity=live_equity,
+            current_spread=current_spread,
+            username=username
+        )
+
     def create_custom_signal(
         self,
         req: TestSignalRequest,
-        live_equity: Optional[float] = None
+        live_equity: Optional[float] = None,
+        username: Optional[str] = None
     ) -> SignalItem:
         current_time = int(time.time())
         sym = req.symbol.upper().strip()
@@ -359,11 +389,11 @@ class StrategyEngine:
 
         # Autonomous Auto-Pilot Execution Hook
         from app.services.autopilot_service import autopilot_service
-        is_auto_active = autopilot_service.is_autopilot_active() and not autopilot_service.is_drawdown_locked()
+        is_auto_active = autopilot_service.is_autopilot_active(username=username) and not autopilot_service.is_drawdown_locked(username=username)
         if is_auto_active:
             try:
-                self.approve_signal(signal_id)
-                autopilot_service.increment_auto_executed_count()
+                self.approve_signal(signal_id, username=username)
+                autopilot_service.increment_auto_executed_count(username=username)
                 signal.reason += " [AUTOPILOT AUTO-EXECUTED]"
             except Exception:
                 pass
@@ -401,7 +431,7 @@ class StrategyEngine:
             pending = [s for s in self._signals.values() if s.status == "PENDING"]
             return sorted(pending, key=lambda s: s.created_at, reverse=True)
 
-    def approve_signal(self, signal_id: str, custom_lot: Optional[float] = None) -> dict:
+    def approve_signal(self, signal_id: str, custom_lot: Optional[float] = None, username: Optional[str] = None) -> dict:
         with self._lock:
             signal = self._signals.get(signal_id)
             if not signal:
@@ -439,7 +469,7 @@ class StrategyEngine:
             sl=signal.sl,
             tp=signal.tp
         )
-        order_res = bridge_service.submit_order(order_req)
+        order_res = bridge_service.submit_order(order_req, username=username)
 
         with self._lock:
             signal.status = "APPROVED"

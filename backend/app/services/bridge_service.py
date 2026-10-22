@@ -23,92 +23,62 @@ from app.models.bridge import (
     InitialDepositResponse,
 )
 from app.core.config import settings
+from app.services.user_service import user_service
 
-ACCOUNT_SETTINGS_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "account_settings.json"
-)
+
+class UserBridgeSession:
+    def __init__(self, username: str):
+        self.username = username
+        self.latest_payload: Optional[HeartbeatPayload] = None
+        self.last_received_time: Optional[float] = None
+        self.pending_commands: List[CommandItem] = []
+        self.is_kill_switch_active: bool = False
+        self.kill_switch_reason: Optional[str] = None
+        self.kill_switch_time: Optional[int] = None
+        self.kill_switch_user: Optional[str] = None
+        self.previous_positions_map: dict = {}
+        self.previous_balance: Optional[float] = None
+        self.market_quotes: Dict[str, MarketQuoteItem] = {}
+        self.closed_trades_map: Dict[int, ClosedTradeItem] = {}
+        self.equity_snapshots: List[dict] = []
+        self.chart_symbol: Optional[str] = None
+        self.mt5_initial_deposit: Optional[float] = None
+        self.custom_initial_deposit: Optional[float] = user_service.get_custom_initial_deposit(username)
+
+    def get_effective_initial_deposit(self) -> Optional[float]:
+        if self.custom_initial_deposit is not None and self.custom_initial_deposit > 0:
+            return self.custom_initial_deposit
+        if self.mt5_initial_deposit is not None and self.mt5_initial_deposit > 0:
+            return self.mt5_initial_deposit
+        if self.latest_payload and self.latest_payload.balance > 0:
+            return self.latest_payload.balance
+        return None
 
 
 class BridgeService:
-    def __init__(self, settings_file: str = ACCOUNT_SETTINGS_FILE):
+    def __init__(self):
         self._lock = threading.Lock()
-        self._settings_file = settings_file
-        self._latest_payload: Optional[HeartbeatPayload] = None
-        self._last_received_time: Optional[float] = None
-        self._pending_commands: List[CommandItem] = []
-        self._is_kill_switch_active: bool = False
-        self._kill_switch_reason: Optional[str] = None
-        self._kill_switch_time: Optional[int] = None
-        self._is_kill_switch_user: Optional[str] = None
-        self._previous_positions_map: dict = {}
-        self._previous_balance: Optional[float] = None
-        self._market_quotes: Dict[str, MarketQuoteItem] = {}
-        self._closed_trades_map: Dict[int, ClosedTradeItem] = {}
-        self._equity_snapshots: List[dict] = []
-        self._chart_symbol: Optional[str] = None
-        self._mt5_initial_deposit: Optional[float] = None
-        self._custom_initial_deposit: Optional[float] = None
-        self._load_settings()
+        self._sessions: Dict[str, UserBridgeSession] = {}
 
-    def _load_settings(self):
-        if os.path.exists(self._settings_file):
-            try:
-                with open(self._settings_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    val = data.get("custom_initial_deposit")
-                    if val is not None and float(val) > 0:
-                        self._custom_initial_deposit = float(val)
-            except Exception:
-                pass
+    def _normalize_user(self, username: Optional[str]) -> str:
+        return (username or settings.ADMIN_USERNAME).strip().lower()
 
-    def _save_settings(self):
-        dir_name = os.path.dirname(self._settings_file)
-        if dir_name and not os.path.exists(dir_name):
-            try:
-                os.makedirs(dir_name, exist_ok=True)
-            except Exception:
-                pass
-        tmp_file = f"{self._settings_file}.tmp"
-        try:
-            with open(tmp_file, "w", encoding="utf-8") as f:
-                json.dump({"custom_initial_deposit": self._custom_initial_deposit}, f, indent=2)
-            os.replace(tmp_file, self._settings_file)
-        except Exception:
-            if os.path.exists(tmp_file):
-                try:
-                    os.remove(tmp_file)
-                except OSError:
-                    pass
+    def _get_or_create_session(self, username: Optional[str]) -> UserBridgeSession:
+        user_key = self._normalize_user(username)
+        if user_key not in self._sessions:
+            self._sessions[user_key] = UserBridgeSession(username=user_key)
+        return self._sessions[user_key]
 
     def reset_state(self):
-        """Reset internal state (primarily used for test isolation)."""
+        """Reset internal state across all sessions (for unit test isolation)."""
         with self._lock:
-            self._latest_payload = None
-            self._last_received_time = None
-            self._pending_commands.clear()
-            self._is_kill_switch_active = False
-            self._kill_switch_reason = None
-            self._kill_switch_time = None
-            self._kill_switch_user = None
-            self._previous_positions_map.clear()
-            self._previous_balance = None
-            self._market_quotes.clear()
-            self._closed_trades_map.clear()
-            self._equity_snapshots.clear()
-            self._chart_symbol = None
-            self._mt5_initial_deposit = None
-            self._custom_initial_deposit = None
+            self._sessions.clear()
 
-            self._previous_balance = None
-            self._market_quotes.clear()
-            self._closed_trades_map.clear()
-            self._equity_snapshots.clear()
-            self._chart_symbol = None
-
-    def get_equity(self) -> Optional[float]:
+    def get_equity(self, username: Optional[str] = None) -> Optional[float]:
         with self._lock:
-            if self._latest_payload and self._latest_payload.equity > 0:
-                return self._latest_payload.equity
+            session = self._get_or_create_session(username)
+            if session.latest_payload and session.latest_payload.equity > 0:
+                return session.latest_payload.equity
             return None
 
     def trigger_kill_switch(self, reason: str = "Manual Emergency Kill Switch Triggered", username: str = "admin") -> dict:
@@ -120,13 +90,13 @@ class BridgeService:
             created_at=current_time
         )
         with self._lock:
-            self._is_kill_switch_active = True
-            self._kill_switch_reason = reason
-            self._kill_switch_time = current_time
-            self._kill_switch_user = username
-            # Put CLOSE_ALL at the head of commands so MT5 executes it immediately on next poll
-            self._pending_commands.insert(0, kill_cmd)
-            closed_count = len(self._latest_payload.positions) if self._latest_payload else 0
+            session = self._get_or_create_session(username)
+            session.is_kill_switch_active = True
+            session.kill_switch_reason = reason
+            session.kill_switch_time = current_time
+            session.kill_switch_user = username
+            session.pending_commands.insert(0, kill_cmd)
+            closed_count = len(session.latest_payload.positions) if session.latest_payload else 0
 
         # Dispatch structured Telegram emergency alert
         try:
@@ -151,11 +121,11 @@ class BridgeService:
 
     def disarm_kill_switch(self, username: str = "admin") -> dict:
         with self._lock:
-            self._is_kill_switch_active = False
-            prev_reason = self._kill_switch_reason
-            self._kill_switch_reason = None
-            self._kill_switch_time = None
-            self._kill_switch_user = None
+            session = self._get_or_create_session(username)
+            session.is_kill_switch_active = False
+            session.kill_switch_reason = None
+            session.kill_switch_time = None
+            session.kill_switch_user = None
 
         return {
             "status": "disarmed",
@@ -164,13 +134,14 @@ class BridgeService:
             "unlocked_by": username
         }
 
-    def get_kill_switch_status(self) -> dict:
+    def get_kill_switch_status(self, username: Optional[str] = None) -> dict:
         with self._lock:
+            session = self._get_or_create_session(username)
             return {
-                "is_kill_switch_active": self._is_kill_switch_active,
-                "kill_switch_reason": self._kill_switch_reason,
-                "kill_switch_time": self._kill_switch_time,
-                "kill_switch_user": self._kill_switch_user,
+                "is_kill_switch_active": session.is_kill_switch_active,
+                "kill_switch_reason": session.kill_switch_reason,
+                "kill_switch_time": session.kill_switch_time,
+                "kill_switch_user": session.kill_switch_user,
                 "default_risk_percent": settings.DEFAULT_RISK_PER_TRADE_PERCENT,
                 "max_risk_percent": settings.MAX_RISK_PER_TRADE_PERCENT,
                 "max_daily_drawdown_percent": settings.MAX_DAILY_DRAWDOWN_PERCENT,
@@ -178,125 +149,124 @@ class BridgeService:
                 "max_lot": settings.MAX_LOT_SIZE
             }
 
-    def process_heartbeat(self, payload: HeartbeatPayload) -> HeartbeatResponse:
+    def process_heartbeat(self, payload: HeartbeatPayload, bridge_token: Optional[str] = None) -> HeartbeatResponse:
         current_time = time.time()
+        token = (bridge_token or payload.bridge_token or "").strip()
+
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Bridge Token required. Please provide X-Bridge-Token header or bridge_token in payload."
+            )
+
+        user = user_service.get_user_by_bridge_token(token)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Bridge Token. Authentication failed."
+            )
+
+        username = user["username"]
         closed_positions = []
-        balance_delta = 0.0
 
         with self._lock:
+            session = self._get_or_create_session(username)
+
             # Update market quotes
             if payload.market_quotes:
                 for q in payload.market_quotes:
-                    self._market_quotes[q.symbol.upper()] = q
+                    session.market_quotes[q.symbol.upper()] = q
 
             # Update closed trades from MT5 history
             if payload.closed_trades:
                 for t in payload.closed_trades:
-                    self._closed_trades_map[t.ticket] = t
+                    session.closed_trades_map[t.ticket] = t
 
             if payload.initial_deposit and payload.initial_deposit > 0:
-                self._mt5_initial_deposit = payload.initial_deposit
+                session.mt5_initial_deposit = payload.initial_deposit
 
             if payload.chart_symbol:
-                self._chart_symbol = payload.chart_symbol.strip()
+                session.chart_symbol = payload.chart_symbol.strip()
 
-            # Record equity snapshot (capped at 500 samples)
+            # Record equity snapshot
             if payload.equity > 0:
-                self._equity_snapshots.append({
+                session.equity_snapshots.append({
                     "timestamp": int(current_time),
                     "equity": payload.equity,
                     "balance": payload.balance
                 })
-                if len(self._equity_snapshots) > 500:
-                    self._equity_snapshots.pop(0)
+                if len(session.equity_snapshots) > 500:
+                    session.equity_snapshots.pop(0)
 
-            # Detect closed positions by comparing with previous positions
+            # Detect closed positions
             current_tickets = {pos.ticket for pos in payload.positions}
-            if self._previous_positions_map:
-                for old_ticket, old_pos in self._previous_positions_map.items():
+            if session.previous_positions_map:
+                for old_ticket, old_pos in session.previous_positions_map.items():
                     if old_ticket not in current_tickets:
                         closed_positions.append(old_pos)
 
-            if self._previous_balance is not None:
-                balance_delta = round(payload.balance - self._previous_balance, 2)
+            session.previous_positions_map = {pos.ticket: pos for pos in payload.positions}
+            session.previous_balance = payload.balance
+            session.latest_payload = payload
+            session.last_received_time = current_time
 
-            self._previous_positions_map = {pos.ticket: pos for pos in payload.positions}
-            self._previous_balance = payload.balance
-
-            self._latest_payload = payload
-            self._last_received_time = current_time
-
-        # Ensure AutoPilot is automatically active whenever MT5 heartbeat is received
+        # Engage AutoPilot for this user
         try:
             from app.services.autopilot_service import autopilot_service
-            autopilot_service.ensure_active_on_connect()
+            autopilot_service.ensure_active_on_connect(username=username)
         except Exception:
             pass
 
-        # Real-time strategy evaluation on real candles sent from MT5
+        # Strategy evaluation for this user
         if (payload.candles and len(payload.candles) >= 20) or (payload.candles_m5 and len(payload.candles_m5) >= 20):
             try:
                 from app.services.strategy_engine import strategy_engine
-                from app.services.autopilot_service import autopilot_service
                 from app.models.strategy import CandleData
 
-                parsed_candles_m15 = []
-                for c in payload.candles:
-                    if isinstance(c, CandleData):
-                        parsed_candles_m15.append(c)
-                    elif isinstance(c, dict):
-                        parsed_candles_m15.append(CandleData(**c))
+                parsed_candles_m15 = [
+                    c if isinstance(c, CandleData) else CandleData(**c) for c in payload.candles
+                ]
+                parsed_candles_m5 = [
+                    c if isinstance(c, CandleData) else CandleData(**c) for c in payload.candles_m5
+                ]
 
-                parsed_candles_m5 = []
-                for c in payload.candles_m5:
-                    if isinstance(c, CandleData):
-                        parsed_candles_m5.append(c)
-                    elif isinstance(c, dict):
-                        parsed_candles_m5.append(CandleData(**c))
-
-                sym_eval = self._chart_symbol or (payload.positions[0].symbol if payload.positions else "XAUUSD")
-                cur_quote = self._market_quotes.get(sym_eval.upper())
+                sym_eval = session.chart_symbol or (payload.positions[0].symbol if payload.positions else "XAUUSD")
+                cur_quote = session.market_quotes.get(sym_eval.upper())
                 current_spread = cur_quote.spread if cur_quote else None
 
-                # Protection: Block multiple layers if symbol already has active open position
-                sym_base = sym_eval.upper().replace("M", "")
-                existing_pos_count = sum(
-                    1 for p in payload.positions
-                    if p.symbol.upper().replace("M", "") == sym_base
+                strategy_engine.evaluate_market(
+                    symbol=sym_eval,
+                    candles=parsed_candles_m15,
+                    candles_m5=parsed_candles_m5,
+                    current_spread=current_spread,
+                    username=username
                 )
-
-                if existing_pos_count >= settings.STRATEGY_MAX_CONCURRENT_POSITIONS_PER_SYMBOL:
-                    generated_signal = None
-                else:
-                    generated_signal = strategy_engine.evaluate_candles(
-                        symbol=sym_eval,
-                        candles=parsed_candles_m15,
-                        candles_m5=parsed_candles_m5 if parsed_candles_m5 else None,
-                        live_equity=payload.equity,
-                        current_spread=current_spread
-                    )
-
-                if generated_signal and autopilot_service.is_autopilot_active() and not autopilot_service.is_drawdown_locked():
-                    trade_vol = (
-                        settings.AUTOPILOT_FIXED_LOT_SIZE
-                        if settings.AUTOPILOT_USE_FIXED_LOT
-                        else generated_signal.recommended_lot
-                    )
-                    strategy_engine.approve_signal(generated_signal.signal_id, custom_lot=trade_vol)
-                    autopilot_service.increment_auto_executed_count()
-                    generated_signal.reason += " [AUTOPILOT AUTO-EXECUTED]"
             except Exception:
                 pass
 
-        # Record closed trades into Daily Drawdown Tracker and dispatch Telegram alerts
+        # Check Drawdown Guard limit
+        try:
+            from app.services.autopilot_service import autopilot_service
+            is_breached = autopilot_service.check_drawdown(
+                current_equity=payload.equity,
+                floating_pnl=payload.floating_pnl,
+                username=username
+            )
+            if is_breached:
+                lockout_reason = (
+                    f"Auto-triggered: Daily Drawdown Guard limit reached "
+                    f"({settings.MAX_DAILY_DRAWDOWN_PERCENT}% limit). Trading locked."
+                )
+                self.trigger_kill_switch(reason=lockout_reason, username=f"system ({username})")
+        except Exception:
+            pass
+
+        # Dispatch alerts for closed trades
         if closed_positions:
             try:
-                from app.services.autopilot_service import autopilot_service
                 from app.services.telegram_service import telegram_service
-
                 for pos in closed_positions:
-                    pnl = balance_delta if (len(closed_positions) == 1 and balance_delta != 0.0) else pos.pnl
-                    autopilot_service.record_closed_trade(pnl)
+                    pnl = pos.pnl if pos.pnl != 0 else (pos.profit or 0.0)
                     telegram_service.send_trade_closed_alert_background(
                         ticket=pos.ticket,
                         symbol=pos.symbol,
@@ -306,10 +276,10 @@ class BridgeService:
             except Exception:
                 pass
 
-        # Pop pending commands to return to EA
+        # Pop pending commands specifically for this user
         with self._lock:
-            commands_to_send = list(self._pending_commands)
-            self._pending_commands.clear()
+            commands_to_send = list(session.pending_commands)
+            session.pending_commands.clear()
 
         return HeartbeatResponse(
             status="ok",
@@ -317,21 +287,21 @@ class BridgeService:
             commands=commands_to_send
         )
 
-    def submit_order(self, order_req: OrderRequest) -> OrderResponse:
+    def submit_order(self, order_req: OrderRequest, username: Optional[str] = None) -> OrderResponse:
         action = order_req.action.upper().strip()
         current_time = int(time.time())
+        user_key = self._normalize_user(username)
 
-        # Safety Check: Block new trade entries if Kill Switch is active
         with self._lock:
-            if self._is_kill_switch_active and action in ("BUY", "SELL"):
+            session = self._get_or_create_session(user_key)
+            if session.is_kill_switch_active and action in ("BUY", "SELL"):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Trading engine is locked by emergency Kill Switch ({self._kill_switch_reason or 'Emergency lockdown'}). Disarm Kill Switch before submitting new orders."
+                    detail=f"Trading engine is locked by emergency Kill Switch ({session.kill_switch_reason or 'Emergency lockdown'}). Disarm Kill Switch before submitting new orders."
                 )
 
-        # Safety Check: Block new trade entries if Daily Drawdown Guard is locked
         from app.services.autopilot_service import autopilot_service
-        if autopilot_service.is_drawdown_locked() and action in ("BUY", "SELL"):
+        if autopilot_service.is_drawdown_locked(username=user_key) and action in ("BUY", "SELL"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Trading engine is locked by Daily Drawdown Guard: Maximum allowable daily loss threshold exceeded."
@@ -359,15 +329,15 @@ class BridgeService:
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unsupported action: '{action}'. Allowed: BUY, SELL, CLOSE, CLOSE_ALL."
+                detail=f"Unknown order action: {action}"
             )
 
-        cmd_id = f"cmd_{current_time}_{uuid.uuid4().hex[:8]}"
+        cmd_id = f"cmd_{current_time}_{uuid.uuid4().hex[:6]}"
         command = CommandItem(
             command_id=cmd_id,
             action=action,
-            symbol=order_req.symbol.strip().upper() if order_req.symbol else None,
-            volume=round(order_req.volume, 2) if order_req.volume else None,
+            symbol=order_req.symbol,
+            volume=order_req.volume,
             sl=order_req.sl,
             tp=order_req.tp,
             ticket=order_req.ticket,
@@ -375,76 +345,51 @@ class BridgeService:
         )
 
         with self._lock:
-            self._pending_commands.append(command)
-
-        msg = f"Order {action}"
-        if command.symbol:
-            msg += f" {command.volume} lots of {command.symbol}"
-        if command.ticket:
-            msg += f" (Ticket #{command.ticket})"
-        msg += " queued for MT5 execution."
-
-        # Dispatch Telegram trade alert
-        try:
-            from app.services.telegram_service import telegram_service
-            telegram_service.send_order_alert_background({
-                "action": action,
-                "symbol": command.symbol or "",
-                "volume": command.volume or 0.0,
-                "ticket": command.ticket or "",
-                "sl": command.sl or 0.0,
-                "tp": command.tp or 0.0
-            })
-        except Exception:
-            pass
+            session.pending_commands.append(command)
 
         return OrderResponse(
             status="queued",
             command_id=cmd_id,
-            message=msg,
+            message=f"Order {action} successfully queued for MT5 bridge execution",
             command=command
         )
 
-    def get_positions(self) -> List[PositionItem]:
+    def get_positions(self, username: Optional[str] = None) -> List[PositionItem]:
         current_time = time.time()
         with self._lock:
-            if self._last_received_time is None or self._latest_payload is None:
+            session = self._get_or_create_session(username)
+            if session.last_received_time is None or session.latest_payload is None:
                 return []
-            
-            diff = current_time - self._last_received_time
-            if diff > settings.HEARTBEAT_TIMEOUT_SECONDS:
+            if (current_time - session.last_received_time) > settings.HEARTBEAT_TIMEOUT_SECONDS:
                 return []
-            
-            return list(self._latest_payload.positions)
+            return list(session.latest_payload.positions)
 
-    def get_market_quotes(self) -> List[MarketQuoteItem]:
+    def get_market_quotes(self, username: Optional[str] = None) -> List[MarketQuoteItem]:
         with self._lock:
-            return sorted(list(self._market_quotes.values()), key=lambda x: x.symbol)
+            session = self._get_or_create_session(username)
+            return list(session.market_quotes.values())
 
-    def get_trade_history(self) -> TradeHistoryResponse:
+    def get_trade_history(self, username: Optional[str] = None) -> TradeHistoryResponse:
         with self._lock:
-            trades = sorted(list(self._closed_trades_map.values()), key=lambda x: x.close_time, reverse=True)
+            session = self._get_or_create_session(username)
+            trades = sorted(
+                list(session.closed_trades_map.values()),
+                key=lambda x: x.close_time or 0,
+                reverse=True
+            )
             total = len(trades)
             if total == 0:
-                return TradeHistoryResponse(
-                    trades=[],
-                    net_pnl=0.0,
-                    win_rate=0.0,
-                    profit_factor=0.0,
-                    total_trades=0,
-                    winning_trades=0,
-                    losing_trades=0,
-                    gross_profit=0.0,
-                    gross_loss=0.0
-                )
+                return TradeHistoryResponse()
 
-            gross_profit = round(sum(t.profit for t in trades if t.profit > 0), 2)
-            gross_loss = round(sum(abs(t.profit) for t in trades if t.profit < 0), 2)
-            net_pnl = round(sum(t.profit for t in trades), 2)
-            wins = sum(1 for t in trades if t.profit > 0)
-            losses = sum(1 for t in trades if t.profit < 0)
-            win_rate = round((wins / total) * 100.0, 1)
-            profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (gross_profit if gross_profit > 0 else 1.0)
+            profits = [t.profit for t in trades]
+            net_pnl = round(sum(profits), 2)
+            wins = sum(1 for p in profits if p > 0)
+            losses = sum(1 for p in profits if p < 0)
+            win_rate = round((wins / total) * 100.0, 1) if total > 0 else 0.0
+
+            gross_profit = round(sum(p for p in profits if p > 0), 2)
+            gross_loss = round(abs(sum(p for p in profits if p < 0)), 2)
+            profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (99.99 if gross_profit > 0 else 0.0)
 
             return TradeHistoryResponse(
                 trades=trades,
@@ -458,30 +403,22 @@ class BridgeService:
                 gross_loss=gross_loss
             )
 
-    def get_effective_initial_deposit(self) -> Optional[float]:
-        if self._custom_initial_deposit is not None and self._custom_initial_deposit > 0:
-            return self._custom_initial_deposit
-        if self._mt5_initial_deposit is not None and self._mt5_initial_deposit > 0:
-            return self._mt5_initial_deposit
-        if self._latest_payload and self._latest_payload.balance > 0:
-            return self._latest_payload.balance
-        return None
-
-    def get_initial_deposit_info(self) -> dict:
+    def get_initial_deposit_info(self, username: Optional[str] = None) -> dict:
         with self._lock:
-            eff_deposit = self.get_effective_initial_deposit()
-            bal = self._latest_payload.balance if self._latest_payload else (eff_deposit or 0.0)
-            eq = self._latest_payload.equity if self._latest_payload else (eff_deposit or 0.0)
+            session = self._get_or_create_session(username)
+            eff_deposit = session.get_effective_initial_deposit()
+            bal = session.latest_payload.balance if session.latest_payload else (eff_deposit or 0.0)
+            eq = session.latest_payload.equity if session.latest_payload else (eff_deposit or 0.0)
             settled_pnl = round(bal - eff_deposit, 2) if eff_deposit else 0.0
             settled_pnl_pct = round((settled_pnl / eff_deposit) * 100.0, 2) if eff_deposit else 0.0
             all_time_pnl = round(eq - eff_deposit, 2) if eff_deposit else 0.0
             all_time_pnl_pct = round((all_time_pnl / eff_deposit) * 100.0, 2) if eff_deposit else 0.0
 
-            source = "override" if self._custom_initial_deposit is not None else ("mt5" if self._mt5_initial_deposit else "default")
+            source = "override" if session.custom_initial_deposit is not None else ("mt5" if session.mt5_initial_deposit else "default")
             return {
                 "status": "success",
                 "initial_deposit": eff_deposit,
-                "is_overridden": self._custom_initial_deposit is not None,
+                "is_overridden": session.custom_initial_deposit is not None,
                 "source": source,
                 "settled_pnl": settled_pnl,
                 "settled_pnl_percent": settled_pnl_pct,
@@ -490,26 +427,28 @@ class BridgeService:
                 "message": "Initial deposit retrieved successfully."
             }
 
-    def set_initial_deposit_override(self, initial_deposit: Optional[float]) -> dict:
+    def set_initial_deposit_override(self, initial_deposit: Optional[float], username: Optional[str] = None) -> dict:
+        user_key = self._normalize_user(username)
         with self._lock:
+            session = self._get_or_create_session(user_key)
             if initial_deposit is not None and float(initial_deposit) > 0:
-                self._custom_initial_deposit = round(float(initial_deposit), 2)
+                session.custom_initial_deposit = round(float(initial_deposit), 2)
             else:
-                self._custom_initial_deposit = None
-            self._save_settings()
+                session.custom_initial_deposit = None
 
-        return self.get_initial_deposit_info()
+        user_service.set_custom_initial_deposit(user_key, session.custom_initial_deposit)
+        return self.get_initial_deposit_info(username=user_key)
 
-    def get_equity_curve(self, time_range: str = "1M") -> EquityCurveResponse:
+    def get_equity_curve(self, time_range: str = "1M", username: Optional[str] = None) -> EquityCurveResponse:
         current_time = time.time()
         rng = (time_range or "1M").strip().upper()
 
         with self._lock:
-            cur_bal = self._latest_payload.balance if self._latest_payload else 0.0
-            cur_eq = self._latest_payload.equity if self._latest_payload else cur_bal
-            eff_deposit = self.get_effective_initial_deposit() or cur_bal
+            session = self._get_or_create_session(username)
+            cur_bal = session.latest_payload.balance if session.latest_payload else 0.0
+            cur_eq = session.latest_payload.equity if session.latest_payload else cur_bal
+            eff_deposit = session.get_effective_initial_deposit() or cur_bal
 
-            # Calculate timeframe window start
             if rng in ("DAY", "1D", "D"):
                 now_utc = datetime.now(timezone.utc)
                 start_ts = int(datetime(now_utc.year, now_utc.month, now_utc.day, tzinfo=timezone.utc).timestamp())
@@ -520,9 +459,8 @@ class BridgeService:
             else:
                 start_ts = 0
 
-            # Filter closed trades within window and sort chronologically
             trades_in_window = [
-                t for t in self._closed_trades_map.values()
+                t for t in session.closed_trades_map.values()
                 if (t.close_time or 0) >= start_ts
             ]
             trades_in_window.sort(key=lambda x: x.close_time or 0)
@@ -533,8 +471,6 @@ class BridgeService:
                 starting_bal_window = eff_deposit
 
             points: List[EquityPointItem] = []
-
-            # 1. Baseline start point of period
             p0_time = start_ts if start_ts > 0 else (trades_in_window[0].close_time if trades_in_window else int(current_time))
             points.append(EquityPointItem(
                 timestamp=p0_time,
@@ -542,7 +478,6 @@ class BridgeService:
                 equity=starting_bal_window
             ))
 
-            # 2. Chronological progression for each closed deal
             running_bal = starting_bal_window
             for t in trades_in_window:
                 running_bal = round(running_bal + t.profit, 2)
@@ -552,7 +487,6 @@ class BridgeService:
                     equity=running_bal
                 ))
 
-            # 3. Live terminal point right now
             points.append(EquityPointItem(
                 timestamp=int(current_time),
                 balance=cur_bal,
@@ -576,14 +510,15 @@ class BridgeService:
                 points=points
             )
 
-    def get_status(self) -> BridgeStatusResponse:
+    def get_status(self, username: Optional[str] = None) -> BridgeStatusResponse:
         current_time = time.time()
         with self._lock:
-            pending_count = len(self._pending_commands)
-            eff_deposit = self.get_effective_initial_deposit()
-            is_overridden = (self._custom_initial_deposit is not None and self._custom_initial_deposit > 0)
+            session = self._get_or_create_session(username)
+            pending_count = len(session.pending_commands)
+            eff_deposit = session.get_effective_initial_deposit()
+            is_overridden = (session.custom_initial_deposit is not None and session.custom_initial_deposit > 0)
             
-            if self._last_received_time is None or self._latest_payload is None:
+            if session.last_received_time is None or session.latest_payload is None:
                 return BridgeStatusResponse(
                     is_connected=False,
                     terminal_connected=False,
@@ -597,21 +532,21 @@ class BridgeService:
                     all_time_pnl=0.0,
                     all_time_pnl_percent=0.0,
                     positions=[],
-                    market_quotes=list(self._market_quotes.values()),
-                    chart_symbol=self._chart_symbol,
-                    closed_trades_count=len(self._closed_trades_map),
+                    market_quotes=list(session.market_quotes.values()),
+                    chart_symbol=session.chart_symbol,
+                    closed_trades_count=len(session.closed_trades_map),
                     pending_commands_count=pending_count,
-                    is_kill_switch_active=self._is_kill_switch_active,
-                    kill_switch_reason=self._kill_switch_reason,
-                    kill_switch_time=self._kill_switch_time
+                    is_kill_switch_active=session.is_kill_switch_active,
+                    kill_switch_reason=session.kill_switch_reason,
+                    kill_switch_time=session.kill_switch_time
                 )
             
-            diff = current_time - self._last_received_time
+            diff = current_time - session.last_received_time
             is_active = (diff <= settings.HEARTBEAT_TIMEOUT_SECONDS)
-            positions = list(self._latest_payload.positions) if is_active else []
+            positions = list(session.latest_payload.positions) if is_active else []
             
-            bal = self._latest_payload.balance
-            eq = self._latest_payload.equity
+            bal = session.latest_payload.balance
+            eq = session.latest_payload.equity
             settled_pnl = round(bal - eff_deposit, 2) if eff_deposit else 0.0
             settled_pnl_pct = round((settled_pnl / eff_deposit) * 100.0, 2) if eff_deposit else 0.0
             all_time_pnl = round(eq - eff_deposit, 2) if eff_deposit else 0.0
@@ -619,10 +554,10 @@ class BridgeService:
 
             return BridgeStatusResponse(
                 is_connected=is_active,
-                terminal_connected=self._latest_payload.terminal_connected if is_active else False,
-                last_heartbeat_at=int(self._last_received_time),
+                terminal_connected=session.latest_payload.terminal_connected if is_active else False,
+                last_heartbeat_at=int(session.last_received_time),
                 seconds_since_last_heartbeat=round(diff, 2),
-                metrics=self._latest_payload,
+                metrics=session.latest_payload,
                 initial_deposit=eff_deposit,
                 is_deposit_overridden=is_overridden,
                 settled_pnl=settled_pnl,
@@ -630,15 +565,14 @@ class BridgeService:
                 all_time_pnl=all_time_pnl,
                 all_time_pnl_percent=all_time_pnl_pct,
                 positions=positions,
-                market_quotes=list(self._market_quotes.values()),
-                chart_symbol=self._chart_symbol,
-                closed_trades_count=len(self._closed_trades_map),
+                market_quotes=list(session.market_quotes.values()),
+                chart_symbol=session.chart_symbol,
+                closed_trades_count=len(session.closed_trades_map),
                 pending_commands_count=pending_count,
-                is_kill_switch_active=self._is_kill_switch_active,
-                kill_switch_reason=self._kill_switch_reason,
-                kill_switch_time=self._kill_switch_time
+                is_kill_switch_active=session.is_kill_switch_active,
+                kill_switch_reason=session.kill_switch_reason,
+                kill_switch_time=session.kill_switch_time
             )
 
 
 bridge_service = BridgeService()
-

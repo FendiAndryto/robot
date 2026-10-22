@@ -14,10 +14,10 @@ router = APIRouter(prefix="/autopilot", tags=["Autonomous Auto-Pilot & Drawdown 
     "/status",
     response_model=AutoPilotStatusResponse,
     status_code=status.HTTP_200_OK,
-    summary="Get current Auto-Pilot operational status and daily drawdown guard metrics"
+    summary="Get current Auto-Pilot operational status and daily drawdown guard metrics for current user"
 )
-async def get_autopilot_status():
-    return autopilot_service.get_status()
+async def get_autopilot_status(current_user: str = Depends(get_current_user)):
+    return autopilot_service.get_status(username=current_user)
 
 
 @router.post(

@@ -8,26 +8,42 @@ from app.core.config import settings
 client = TestClient(app)
 
 
+from app.services.autopilot_service import autopilot_service
+
+
 @pytest.fixture(autouse=True)
 def clean_state():
     bridge_service.reset_state()
+    autopilot_service.reset_state()
     yield
     bridge_service.reset_state()
+    autopilot_service.reset_state()
 
 
-def get_auth_headers(username: str = "admin") -> dict:
-    token = create_access_token(subject=username)
-    return {"Authorization": f"Bearer {token}"}
+from app.services.user_service import user_service
+
+def get_auth_context(username: str = settings.ADMIN_USERNAME):
+    user = user_service.get_user(username)
+    if not user:
+        user = user_service.register(username, "AdminPassword123!")
+    token = create_access_token(user["username"], user.get("token_version", 1))
+    return {"Authorization": f"Bearer {token}"}, user["bridge_token"]
+
+
+def get_auth_headers(username: str = settings.ADMIN_USERNAME) -> dict:
+    headers, _ = get_auth_context(username)
+    return headers
 
 
 def test_calculate_lot_eurusd():
+    auth_headers = get_auth_headers()
     payload = {
         "symbol": "EURUSD",
         "stop_loss_pips": 20.0,
         "risk_percent": 1.0,
         "equity": 10000.0
     }
-    response = client.post("/api/v1/risk/calculate-lot", json=payload)
+    response = client.post("/api/v1/risk/calculate-lot", json=payload, headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert data["symbol"] == "EURUSD"
@@ -41,13 +57,14 @@ def test_calculate_lot_eurusd():
 
 
 def test_calculate_lot_xauusd():
+    auth_headers = get_auth_headers()
     payload = {
         "symbol": "XAUUSD",
         "stop_loss_pips": 50.0,
         "risk_percent": 2.0,
         "equity": 5000.0
     }
-    response = client.post("/api/v1/risk/calculate-lot", json=payload)
+    response = client.post("/api/v1/risk/calculate-lot", json=payload, headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert data["symbol"] == "XAUUSD"
@@ -57,6 +74,7 @@ def test_calculate_lot_xauusd():
 
 
 def test_calculate_lot_usdjpy():
+    auth_headers = get_auth_headers()
     payload = {
         "symbol": "USDJPY",
         "stop_loss_pips": 30.0,
@@ -64,7 +82,7 @@ def test_calculate_lot_usdjpy():
         "equity": 10000.0,
         "market_price": 150.0
     }
-    response = client.post("/api/v1/risk/calculate-lot", json=payload)
+    response = client.post("/api/v1/risk/calculate-lot", json=payload, headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert data["symbol"] == "USDJPY"
@@ -74,6 +92,7 @@ def test_calculate_lot_usdjpy():
 
 
 def test_calculate_lot_min_clamping():
+    auth_headers = get_auth_headers()
     # Tiny risk amount with massive SL distance
     payload = {
         "symbol": "EURUSD",
@@ -81,7 +100,7 @@ def test_calculate_lot_min_clamping():
         "risk_percent": 0.05,
         "equity": 100.0
     }
-    response = client.post("/api/v1/risk/calculate-lot", json=payload)
+    response = client.post("/api/v1/risk/calculate-lot", json=payload, headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     # Clamped to MIN_LOT_SIZE (0.01)
@@ -89,18 +108,20 @@ def test_calculate_lot_min_clamping():
 
 
 def test_calculate_lot_max_risk_rejection():
+    auth_headers = get_auth_headers()
     payload = {
         "symbol": "EURUSD",
         "stop_loss_pips": 20.0,
         "risk_percent": 25.0,  # Exceeds max ceiling (10.0%)
         "equity": 10000.0
     }
-    response = client.post("/api/v1/risk/calculate-lot", json=payload)
+    response = client.post("/api/v1/risk/calculate-lot", json=payload, headers=auth_headers)
     assert response.status_code == 400
     assert "exceeds maximum allowed safety ceiling" in response.json()["detail"]
 
 
 def test_calculate_lot_uses_live_equity_when_omitted():
+    auth_headers, bridge_token = get_auth_context()
     # Simulate a heartbeat sending account equity of $30,000
     heartbeat_payload = {
         "account_number": 998877,
@@ -115,6 +136,7 @@ def test_calculate_lot_uses_live_equity_when_omitted():
         "terminal_connected": True,
         "open_positions": 0,
         "positions": [],
+        "bridge_token": bridge_token,
         "timestamp": 1700000000
     }
     hb_resp = client.post("/api/v1/bridge/heartbeat", json=heartbeat_payload)
@@ -126,7 +148,7 @@ def test_calculate_lot_uses_live_equity_when_omitted():
         "stop_loss_pips": 30.0,
         "risk_percent": 1.0
     }
-    response = client.post("/api/v1/risk/calculate-lot", json=payload)
+    response = client.post("/api/v1/risk/calculate-lot", json=payload, headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert data["equity"] == 30000.0
@@ -136,10 +158,10 @@ def test_calculate_lot_uses_live_equity_when_omitted():
 
 
 def test_kill_switch_lifecycle():
-    auth_headers = get_auth_headers("admin")
+    auth_headers, bridge_token = get_auth_context()
 
     # 1. Initial status: kill switch disarmed
-    status_resp = client.get("/api/v1/risk/status")
+    status_resp = client.get("/api/v1/risk/status", headers=auth_headers)
     assert status_resp.status_code == 200
     assert status_resp.json()["is_kill_switch_active"] is False
 
@@ -153,7 +175,7 @@ def test_kill_switch_lifecycle():
     assert kill_data["reason"] == "Test Market Volatility Spike"
 
     # 3. Verify bridge status reflects kill switch engagement
-    bridge_status = client.get("/api/v1/bridge/status").json()
+    bridge_status = client.get("/api/v1/bridge/status", headers=auth_headers).json()
     assert bridge_status["is_kill_switch_active"] is True
     assert bridge_status["kill_switch_reason"] == "Test Market Volatility Spike"
 
@@ -164,6 +186,7 @@ def test_kill_switch_lifecycle():
         "currency": "USD",
         "balance": 10000.0,
         "equity": 10000.0,
+        "bridge_token": bridge_token,
         "timestamp": 1700000000
     })
     assert hb_resp.status_code == 200
@@ -176,7 +199,7 @@ def test_kill_switch_lifecycle():
     from fastapi import HTTPException
     import pytest
     with pytest.raises(HTTPException) as exc_info:
-        bridge_service.submit_order(OrderRequest(action="BUY", symbol="EURUSD", volume=0.1))
+        bridge_service.submit_order(OrderRequest(action="BUY", symbol="EURUSD", volume=0.1), username=settings.ADMIN_USERNAME)
     assert exc_info.value.status_code == 403
     assert "locked by emergency Kill Switch" in exc_info.value.detail
 
@@ -196,7 +219,7 @@ def test_kill_switch_lifecycle():
     assert unlock_resp.json()["is_kill_switch_active"] is False
 
     # 8. Internal service BUY is now permitted again
-    buy_again_resp = bridge_service.submit_order(OrderRequest(action="BUY", symbol="EURUSD", volume=0.1))
+    buy_again_resp = bridge_service.submit_order(OrderRequest(action="BUY", symbol="EURUSD", volume=0.1), username=settings.ADMIN_USERNAME)
     assert buy_again_resp.status == "queued"
 
 
