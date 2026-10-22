@@ -5,9 +5,9 @@
 //+------------------------------------------------------------------+
 #property copyright   "Copyright 2026, TradeGear"
 #property link        "https://tradegear.my.id"
-#property version     "1.00"
-#property description "TradeGear Standalone Confluence Trading Robot EA"
-#property description "Trend: EMA 20/50 | Momentum: RSI 14 | Auto Risk Mgmt & Protection"
+#property version     "1.01"
+#property description "TradeGear Standalone Confluence Trading Robot EA v1.01"
+#property description "Trend: EMA 20/50 | Momentum: RSI 14 | Auto Spread Adaptation & Protection"
 
 #include <Trade\Trade.mqh>
 
@@ -29,7 +29,7 @@ input double          InpRiskPercent       = 1.0;      // Risk Per Trade (% of E
 input double          InpFixedLot          = 0.01;     // Fixed Lot (if Dynamic Risk = false)
 input double          InpStopLossPips      = 25.0;     // Default Stop Loss in Pips
 input double          InpTakeProfitPips    = 50.0;     // Default Take Profit in Pips (1:2 R:R)
-input double          InpMaxSpreadPoints   = 40.0;     // Max Allowable Spread in Points
+input double          InpMaxSpreadPoints   = 350.0;    // Max Spread in Points (Gold: 350, FX: 40)
 
 input group "--- Trade Protection (BEP & Trailing) ---"
 input bool            InpEnableBEP         = true;     // Enable Auto-Breakeven Protection
@@ -73,6 +73,25 @@ int GetPointsPerPip(string sym)
       return 10;
    }
    return 1;
+}
+
+//+------------------------------------------------------------------+
+//| Get Adaptive Max Spread Limit for symbol                         |
+//+------------------------------------------------------------------+
+double GetMaxSpreadLimit(string sym)
+{
+   string upper = sym;
+   StringToUpper(upper);
+   if(StringFind(upper, "XAU") >= 0 || StringFind(upper, "GOLD") >= 0)
+   {
+      // Gold default max spread threshold (35 pips = 350 points)
+      return (InpMaxSpreadPoints > 40.0 ? InpMaxSpreadPoints : 350.0);
+   }
+   if(StringFind(upper, "BTC") >= 0)
+   {
+      return (InpMaxSpreadPoints > 100.0 ? InpMaxSpreadPoints : 3000.0);
+   }
+   return InpMaxSpreadPoints;
 }
 
 //+------------------------------------------------------------------+
@@ -246,17 +265,23 @@ void ManagePositionsProtection()
 //+------------------------------------------------------------------+
 void UpdateChartHUD(double fastEMA, double slowEMA, double rsi, string signalStatus)
 {
+   double maxSpreadAllowed = GetMaxSpreadLimit(_Symbol);
+   int curSpread = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   string bias = "NEUTRAL";
+   if(fastEMA > slowEMA && fastEMA > 0) bias = "BULLISH (UPTREND)";
+   else if(fastEMA < slowEMA && slowEMA > 0) bias = "BEARISH (DOWNTREND)";
+
    string hud = "=================================================\n";
-   hud += "  TRADEGEAR CONFLUENCE ROBOT (AUTONOMOUS EA)    \n";
+   hud += "  TRADEGEAR CONFLUENCE ROBOT (AUTONOMOUS EA) v1.01\n";
    hud += "=================================================\n";
    hud += StringFormat(" Symbol: %s | Timeframe: %s | Magic: %I64u\n", _Symbol, EnumToString(_Period), InpMagicNumber);
    hud += StringFormat(" Fast EMA (%d): %.5f | Slow EMA (%d): %.5f\n", InpFastEMAPeriod, fastEMA, InpSlowEMAPeriod, slowEMA);
-   hud += StringFormat(" RSI (%d): %.2f | Bias: %s\n", InpRSIPeriod, rsi, (fastEMA > slowEMA ? "BULLISH" : "BEARISH"));
-   hud += StringFormat(" Spread: %d pts (Max: %d) | Open Pos: %d\n", (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD), (int)InpMaxSpreadPoints, CountOpenPositions(_Symbol, InpMagicNumber));
-   hud += StringFormat(" Risk Setting: %.1f%% | Status: %s\n", InpRiskPercent, signalStatus);
+   hud += StringFormat(" RSI (%d): %.2f | Market Bias: %s\n", InpRSIPeriod, rsi, bias);
+   hud += StringFormat(" Spread: %d pts (Limit: %d pts) | Open Pos: %d\n", curSpread, (int)maxSpreadAllowed, CountOpenPositions(_Symbol, InpMagicNumber));
+   hud += StringFormat(" Risk Lot: %.1f%% Equity | Status: %s\n", InpRiskPercent, signalStatus);
    hud += "=================================================\n";
-   hud += " Note: Run TradeGearMonitor.ex5 on any chart to\n";
-   hud += " stream telemetry & track journal in TradeGear SaaS.\n";
+   hud += " Note: Run TradeGearMonitor.ex5 on another chart\n";
+   hud += " to stream telemetry & journal in TradeGear SaaS.\n";
    hud += "=================================================";
 
    Comment(hud);
@@ -282,7 +307,8 @@ int OnInit()
       return INIT_FAILED;
    }
 
-   Print("[TG-Robot] TradeGear Confluence Robot initialized successfully on ", _Symbol);
+   PrintFormat("[TG-Robot] TradeGear Confluence Robot initialized on %s (Spread Limit: %d pts)",
+               _Symbol, (int)GetMaxSpreadLimit(_Symbol));
    return INIT_SUCCEEDED;
 }
 
@@ -306,35 +332,34 @@ void OnTick()
    // 1. Manage active position protections on every tick
    ManagePositionsProtection();
 
-   // 2. Spread Guard: Do not open trades if spread is wide
+   // 2. Read indicator buffers for previous completed candle (index 1)
+   double fastEMABuffer[2], slowEMABuffer[2], rsiBuffer[2];
+   double fastEMA = 0.0, slowEMA = 0.0, rsi = 0.0;
+   if(CopyBuffer(g_handleFastEMA, 0, 1, 2, fastEMABuffer) >= 2) fastEMA = fastEMABuffer[1];
+   if(CopyBuffer(g_handleSlowEMA, 0, 1, 2, slowEMABuffer) >= 2) slowEMA = slowEMABuffer[1];
+   if(CopyBuffer(g_handleRSI, 0, 1, 2, rsiBuffer) >= 2) rsi = rsiBuffer[1];
+
+   // 3. Spread Guard Check
    long spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   if(spread > (long)InpMaxSpreadPoints)
+   double maxSpreadAllowed = GetMaxSpreadLimit(_Symbol);
+   if(spread > (long)maxSpreadAllowed)
    {
-      UpdateChartHUD(0, 0, 0, "BLOCKED: Spread too wide");
+      UpdateChartHUD(fastEMA, slowEMA, rsi, StringFormat("BLOCKED: Spread too wide (%d > %d pts)", (int)spread, (int)maxSpreadAllowed));
       return;
    }
 
-   // 3. New Bar Check: Evaluate signals once per bar close
+   int openCount = CountOpenPositions(_Symbol, InpMagicNumber);
+
+   // 4. New Bar Check: Evaluate signals once per bar close
    datetime currentBarTime = iTime(_Symbol, _Period, 0);
    if(currentBarTime == g_lastBarTime)
    {
-      return; // Wait for new candle
+      string idleStatus = (openCount > 0) ? "POSITION ACTIVE (MANAGING PROTECTION)" : "WAITING FOR CANDLE CLOSE...";
+      UpdateChartHUD(fastEMA, slowEMA, rsi, idleStatus);
+      return;
    }
 
-   // Read indicator buffers for previous completed candle (index 1)
-   double fastEMABuffer[2], slowEMABuffer[2], rsiBuffer[2];
-   if(CopyBuffer(g_handleFastEMA, 0, 1, 2, fastEMABuffer) < 2) return;
-   if(CopyBuffer(g_handleSlowEMA, 0, 1, 2, slowEMABuffer) < 2) return;
-   if(CopyBuffer(g_handleRSI, 0, 1, 2, rsiBuffer) < 2) return;
-
-   double fastEMA = fastEMABuffer[1];
-   double slowEMA = slowEMABuffer[1];
-   double rsi = rsiBuffer[1];
    double closePrice = iClose(_Symbol, _Period, 1);
-
-   // Check if we already have an active trade for this symbol & magic
-   int openCount = CountOpenPositions(_Symbol, InpMagicNumber);
-
    string signalStatus = "SCANNING...";
 
    if(openCount == 0)
@@ -362,7 +387,7 @@ void OnTick()
          else
          {
             PrintFormat("[TG-Robot] BUY order failed! Error: %d", GetLastError());
-            signalStatus = "ORDER ERROR";
+            signalStatus = StringFormat("BUY ERROR (%d)", GetLastError());
          }
       }
       // --- BEARISH CONFLUENCE ---
@@ -384,8 +409,12 @@ void OnTick()
          else
          {
             PrintFormat("[TG-Robot] SELL order failed! Error: %d", GetLastError());
-            signalStatus = "ORDER ERROR";
+            signalStatus = StringFormat("SELL ERROR (%d)", GetLastError());
          }
+      }
+      else
+      {
+         signalStatus = "NO SIGNAL CONFLUENCE";
       }
    }
    else
