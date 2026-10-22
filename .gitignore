@@ -43,6 +43,7 @@ users.json
 
 # MT5 & Wine
 *.ex5
+!frontend/public/*.ex5
 *.log
 terminal_data/
 wine_prefix/

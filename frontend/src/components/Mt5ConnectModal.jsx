@@ -8,7 +8,9 @@ import {
   Check,
   ShieldCheck,
   KeyRound,
-  Copy
+  Copy,
+  Download,
+  Bot
 } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -136,6 +138,84 @@ export default function Mt5ConnectModal({
             </div>
           </div>
 
+          {/* Download EA Section */}
+          <div
+            style={{
+              padding: '12px 14px',
+              background: 'linear-gradient(135deg, rgba(69, 224, 173, 0.12), rgba(15, 30, 40, 0.8))',
+              border: '1px solid rgba(69, 224, 173, 0.35)',
+              borderRadius: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#45e0ad', fontWeight: 700, fontSize: '0.85rem' }}>
+                <Download size={16} />
+                <span>Download File EA MT5:</span>
+              </div>
+              <span style={{ fontSize: '10px', color: '#8899a6', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: '4px' }}>
+                MetaTrader 5
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <a
+                href="/TradeGearMonitor.ex5"
+                download="TradeGearMonitor.ex5"
+                className="btn"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  fontSize: '11px',
+                  padding: '9px 10px',
+                  textDecoration: 'none',
+                  background: '#45e0ad',
+                  color: '#080f14',
+                  fontWeight: 700
+                }}
+                id="btn-download-monitor-ex5"
+                title="Download TradeGearMonitor.ex5 siap pakai"
+              >
+                <Download size={14} />
+                <span>Download Monitor (.ex5)</span>
+              </a>
+
+              <a
+                href="/TradeGearConfluenceRobot.ex5"
+                download="TradeGearConfluenceRobot.ex5"
+                className="btn alt"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  fontSize: '11px',
+                  padding: '9px 10px',
+                  textDecoration: 'none'
+                }}
+                id="btn-download-robot-ex5"
+                title="Download Standalone Robot Trading EA"
+              >
+                <Bot size={14} />
+                <span>Robot Trading (.ex5)</span>
+              </a>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', fontSize: '10px', color: '#8899a6', justifyContent: 'center' }}>
+              <a href="/TradeGearMonitor.mq5" download="TradeGearMonitor.mq5" style={{ color: '#45e0ad', textDecoration: 'none' }}>
+                Source Monitor (.mq5)
+              </a>
+              <span>•</span>
+              <a href="/TradeGearConfluenceRobot.mq5" download="TradeGearConfluenceRobot.mq5" style={{ color: '#45e0ad', textDecoration: 'none' }}>
+                Source Robot (.mq5)
+              </a>
+            </div>
+          </div>
+
           {/* Bridge Token Box */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -219,9 +299,9 @@ export default function Mt5ConnectModal({
             <div className="mt5-step-card">
               <div className="mt5-step-number">1</div>
               <div className="mt5-step-content">
-                <strong>Buka MT5 di Laptop</strong>
+                <strong>Download & Pasang File EA ke MT5</strong>
                 <p>
-                  Pastikan akun broker Anda (cth: Exness) sudah login pada terminal MetaTrader 5 di laptop.
+                  Klik tombol <strong>Download Monitor (.ex5)</strong> di atas. Buka terminal MT5 Anda: klik menu <strong>File &gt; Open Data Folder</strong>, lalu masuk ke folder <strong>MQL5 &gt; Experts</strong> dan tempelkan (paste) file tersebut di sana.
                 </p>
               </div>
             </div>
