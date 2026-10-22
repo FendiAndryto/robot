@@ -5,9 +5,9 @@
 //+------------------------------------------------------------------+
 #property copyright   "Copyright 2026, TradeGear"
 #property link        "https://tradegear.my.id"
-#property version     "1.06"
-#property description "TradeGear Pure 1:2 R:R Autonomous Confluence Robot EA v1.06"
-#property description "Trend: EMA 20/50 | Pullback Retest Filter | Pure 1:2 R:R (Zero BEP Choke)"
+#property version     "1.07"
+#property description "TradeGear Pure 1:2 R:R Autonomous Confluence Robot EA v1.07"
+#property description "Trend: EMA 20/50 | Dynamic Swing/Engulfing Structure SL | Adaptive 1:2 R:R"
 
 #include <Trade\Trade.mqh>
 
@@ -26,8 +26,14 @@ input group "--- Risk & Position Sizing ---"
 input bool            InpUseDynamicRisk        = false;    // Use % Equity Risk Sizing (Default: false -> Lot 0.01)
 input double          InpRiskPercent           = 1.0;      // Risk Per Trade (% of Equity)
 input double          InpFixedLot              = 0.01;     // Fixed Lot Size (Default: 0.01 lot)
-input double          InpStopLossPips          = 45.0;     // Stop Loss in Pips (Default: 45 pips)
-input double          InpTakeProfitPips        = 90.0;     // Take Profit in Pips (Strict 1:2 Ratio -> 90 pips)
+input bool            InpUseSwingSL            = true;     // Place SL at Recent Swing / Engulfing Structure
+input int             InpSwingLookbackBars     = 3;        // Swing Lookback Bars (1 = Trigger Candle only, 3 = Recent Swing)
+input double          InpSLBufferPips          = 3.0;      // Safety Buffer beyond Candle Wick (Pips)
+input double          InpMinSLPips             = 20.0;     // Min SL Distance in Pips (Default: 20 pips)
+input double          InpMaxSLPips             = 80.0;     // Max SL Ceiling in Pips (Default: 80 pips)
+input double          InpRiskRewardRatio       = 2.0;      // Strict 1:2 R:R Ratio (TP = SL * Ratio)
+input double          InpStopLossPips          = 45.0;     // Fallback SL in Pips (used if Swing SL disabled)
+input double          InpTakeProfitPips        = 90.0;     // Fallback TP in Pips (used if Swing SL disabled)
 input double          InpMaxSpreadPoints       = 350.0;    // Max Spread in Points (Gold: 350, FX: 45)
 
 input group "--- Execution Settings ---"
@@ -109,7 +115,7 @@ double GetAdaptiveSLPips(string sym)
 //+------------------------------------------------------------------+
 double GetAdaptiveTPPips(string sym)
 {
-   return GetAdaptiveSLPips(sym) * 2.0; // Strictly 1:2 R:R (e.g. 45 pip SL -> 90 pip TP)
+   return GetAdaptiveSLPips(sym) * InpRiskRewardRatio; // Strictly 1:2 R:R
 }
 
 //+------------------------------------------------------------------+
@@ -188,15 +194,89 @@ int CountOpenPositions(string sym, ulong magic)
 }
 
 //+------------------------------------------------------------------+
+//| Calculate Dynamic Swing / Structure SL & 1:2 TP                 |
+//+------------------------------------------------------------------+
+void CalculateDynamicSLTP(bool isBuy, double entryPrice, double &outSLPrice, double &outTPPrice, double &outSLPips, double &outTPPips)
+{
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+   int pointsPerPip = GetPointsPerPip(_Symbol);
+   double pipUnit = (double)pointsPerPip * point;
+
+   if(!InpUseSwingSL)
+   {
+      outSLPips = GetAdaptiveSLPips(_Symbol);
+      outTPPips = outSLPips * InpRiskRewardRatio;
+      if(isBuy)
+      {
+         outSLPrice = NormalizeDouble(entryPrice - (outSLPips * pipUnit), digits);
+         outTPPrice = NormalizeDouble(entryPrice + (outTPPips * pipUnit), digits);
+      }
+      else
+      {
+         outSLPrice = NormalizeDouble(entryPrice + (outSLPips * pipUnit), digits);
+         outTPPrice = NormalizeDouble(entryPrice - (outTPPips * pipUnit), digits);
+      }
+      return;
+   }
+
+   int lookback = (InpSwingLookbackBars > 0) ? InpSwingLookbackBars : 1;
+   double bufferDistance = InpSLBufferPips * pipUnit;
+
+   if(isBuy)
+   {
+      double lowestLow = iLow(_Symbol, _Period, 1);
+      for(int i = 2; i <= lookback; i++)
+      {
+         double lowVal = iLow(_Symbol, _Period, i);
+         if(lowVal < lowestLow) lowestLow = lowVal;
+      }
+
+      double rawSL = lowestLow - bufferDistance;
+      double slDist = entryPrice - rawSL;
+      double slPips = (pipUnit > 0.0) ? (slDist / pipUnit) : InpStopLossPips;
+
+      if(slPips < InpMinSLPips) slPips = InpMinSLPips;
+      if(slPips > InpMaxSLPips) slPips = InpMaxSLPips;
+
+      outSLPips = slPips;
+      outTPPips = slPips * InpRiskRewardRatio;
+      outSLPrice = NormalizeDouble(entryPrice - (outSLPips * pipUnit), digits);
+      outTPPrice = NormalizeDouble(entryPrice + (outTPPips * pipUnit), digits);
+   }
+   else
+   {
+      double highestHigh = iHigh(_Symbol, _Period, 1);
+      for(int i = 2; i <= lookback; i++)
+      {
+         double highVal = iHigh(_Symbol, _Period, i);
+         if(highVal > highestHigh) highestHigh = highVal;
+      }
+
+      double rawSL = highestHigh + bufferDistance;
+      double slDist = rawSL - entryPrice;
+      double slPips = (pipUnit > 0.0) ? (slDist / pipUnit) : InpStopLossPips;
+
+      if(slPips < InpMinSLPips) slPips = InpMinSLPips;
+      if(slPips > InpMaxSLPips) slPips = InpMaxSLPips;
+
+      outSLPips = slPips;
+      outTPPips = slPips * InpRiskRewardRatio;
+      outSLPrice = NormalizeDouble(entryPrice + (outSLPips * pipUnit), digits);
+      outTPPrice = NormalizeDouble(entryPrice - (outTPPips * pipUnit), digits);
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Update On-Chart Information HUD                                  |
 //+------------------------------------------------------------------+
 void UpdateChartHUD(double fastEMA, double slowEMA, double rsi, string signalStatus)
 {
    double maxSpreadAllowed = GetMaxSpreadLimit(_Symbol);
    int curSpread = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   double slPips = GetAdaptiveSLPips(_Symbol);
-   double tpPips = GetAdaptiveTPPips(_Symbol);
-   double lot = InpUseDynamicRisk ? CalculateLotSize(_Symbol, slPips, InpRiskPercent) : InpFixedLot;
+   double defaultSLPips = GetAdaptiveSLPips(_Symbol);
+   double defaultTPPips = defaultSLPips * InpRiskRewardRatio;
+   double lot = InpUseDynamicRisk ? CalculateLotSize(_Symbol, defaultSLPips, InpRiskPercent) : InpFixedLot;
 
    bool termTrade = (bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
    bool eaTrade   = (bool)MQLInfoInteger(MQL_TRADE_ALLOWED);
@@ -207,14 +287,22 @@ void UpdateChartHUD(double fastEMA, double slowEMA, double rsi, string signalSta
    else if(fastEMA < slowEMA && slowEMA > 0) bias = "BEARISH (DOWNTREND)";
 
    string hud = "=================================================\n";
-   hud += "  TRADEGEAR CONFLUENCE ROBOT (AUTONOMOUS EA) v1.06\n";
+   hud += "  TRADEGEAR CONFLUENCE ROBOT (AUTONOMOUS EA) v1.07\n";
    hud += "=================================================\n";
    hud += StringFormat(" Symbol: %s | Timeframe: %s | Magic: %I64u\n", _Symbol, EnumToString(_Period), InpMagicNumber);
    hud += StringFormat(" Fast EMA (%d): %.5f | Slow EMA (%d): %.5f\n", InpFastEMAPeriod, fastEMA, InpSlowEMAPeriod, slowEMA);
    hud += StringFormat(" RSI (%d): %.2f | Market Bias: %s\n", InpRSIPeriod, rsi, bias);
    hud += StringFormat(" Spread: %d pts (Limit: %d pts) | Open Pos: %d\n", curSpread, (int)maxSpreadAllowed, CountOpenPositions(_Symbol, InpMagicNumber));
-   hud += StringFormat(" Strategy Targets: SL %.0f pips | TP %.0f pips (1:2 R:R)\n", slPips, tpPips);
-   hud += " Protection Model: Pure SL/TP (BEP Disabled - Full Room to TP)\n";
+   if(InpUseSwingSL)
+   {
+      hud += StringFormat(" SL/TP Mode : DYNAMIC SWING (Lookback %d bars | +%.1fp buf)\n", InpSwingLookbackBars, InpSLBufferPips);
+      hud += StringFormat(" Target R:R : Strict 1:%.1f (Min %.0fp, Max %.0fp)\n", InpRiskRewardRatio, InpMinSLPips, InpMaxSLPips);
+   }
+   else
+   {
+      hud += StringFormat(" SL/TP Mode : FIXED (SL %.0fp | TP %.0fp - 1:%.1f R:R)\n", defaultSLPips, defaultTPPips, InpRiskRewardRatio);
+   }
+   hud += " Protection Model: Pure Dynamic SL/TP (BEP Disabled)\n";
    hud += StringFormat(" Order Execution Lot : %.2f %s\n", lot, InpUseDynamicRisk ? "(Dynamic)" : "(Fixed 0.01)");
    hud += "---------------- PERMISSIONS --------------------\n";
    hud += StringFormat(" Toolbar Algo Trading : %s\n", termTrade ? "ON [GREEN OK]" : "OFF! [CLICK TOOLBAR ALGO TRADING]");
@@ -251,9 +339,9 @@ int OnInit()
    }
 
    double slPips = GetAdaptiveSLPips(_Symbol);
-   double tpPips = GetAdaptiveTPPips(_Symbol);
-   PrintFormat("[TG-Robot] Initialized v1.06 on %s | Pure 1:2 RR | SL: %.0fp | TP: %.0fp | Lot: %.2f | Zero-BEP Breathing Mode",
-               _Symbol, slPips, tpPips, InpFixedLot);
+   double tpPips = slPips * InpRiskRewardRatio;
+   PrintFormat("[TG-Robot] Initialized v1.07 on %s | Swing SL: %s (Lookback %d, Buffer %.1fp) | 1:%.1f RR | Default SL/TP: %.0fp/%.0fp | Lot: %.2f",
+               _Symbol, InpUseSwingSL ? "ENABLED" : "DISABLED", InpSwingLookbackBars, InpSLBufferPips, InpRiskRewardRatio, slPips, tpPips, InpFixedLot);
    PrintFormat("[TG-Robot] Pre-flight Check: TerminalTradeAllowed=%s | EATradeAllowed=%s | AcctTradeAllowed=%s",
                TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ? "YES" : "NO",
                MQLInfoInteger(MQL_TRADE_ALLOWED) ? "YES" : "NO",
@@ -313,9 +401,7 @@ void OnTick()
       int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
       int pointsPerPip = GetPointsPerPip(_Symbol);
 
-      double slPips = GetAdaptiveSLPips(_Symbol);
-      double tpPips = GetAdaptiveTPPips(_Symbol);
-      double lot = InpUseDynamicRisk ? CalculateLotSize(_Symbol, slPips, InpRiskPercent) : InpFixedLot;
+      double defaultSLPips = GetAdaptiveSLPips(_Symbol);
 
       double open1  = iOpen(_Symbol, _Period, 1);
       double high1  = iHigh(_Symbol, _Period, 1);
@@ -323,7 +409,7 @@ void OnTick()
       double close1 = iClose(_Symbol, _Period, 1);
 
       // Maximum allowable distance from Fast EMA to avoid buying/selling at exhausted extremes:
-      double maxDistFromEMA = slPips * 0.70 * pointsPerPip * point;
+      double maxDistFromEMA = defaultSLPips * 0.70 * pointsPerPip * point;
 
       // BULLISH CONFLUENCE:
       // 1. Fast EMA > Slow EMA (Uptrend bias)
@@ -394,16 +480,17 @@ void OnTick()
          if(isBullish)
          {
             double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-            double sl = NormalizeDouble(ask - (slPips * pointsPerPip * point), digits);
-            double tp = NormalizeDouble(ask + (tpPips * pointsPerPip * point), digits);
+            double slPrice = 0.0, tpPrice = 0.0, dynamicSLPips = 0.0, dynamicTPPips = 0.0;
+            CalculateDynamicSLTP(true, ask, slPrice, tpPrice, dynamicSLPips, dynamicTPPips);
+            double lot = InpUseDynamicRisk ? CalculateLotSize(_Symbol, dynamicSLPips, InpRiskPercent) : InpFixedLot;
 
             ResetLastError();
-            if(g_trade.Buy(lot, _Symbol, ask, sl, tp, InpOrderComment))
+            if(g_trade.Buy(lot, _Symbol, ask, slPrice, tpPrice, InpOrderComment))
             {
-               PrintFormat("[TG-Robot] BUY executed! Lot: %.2f | Ask: %.5f | SL: %.5f (-%.0fp) | TP: %.5f (+%.0fp) [Pure 1:2 RR - Zero BEP]",
-                           lot, ask, sl, slPips, tp, tpPips);
+               PrintFormat("[TG-Robot] BUY executed! Lot: %.2f | Ask: %.5f | SL: %.5f (-%.1fp) | TP: %.5f (+%.1fp) [Swing SL - Strict 1:%.1f RR]",
+                           lot, ask, slPrice, dynamicSLPips, tpPrice, dynamicTPPips, InpRiskRewardRatio);
                g_lastBarTime = currentBarTime;
-               signalStatus = "BUY EXECUTED (Pure 1:2 RR)";
+               signalStatus = StringFormat("BUY EXECUTED (SL %.1fp | TP %.1fp)", dynamicSLPips, dynamicTPPips);
             }
             else
             {
@@ -415,16 +502,17 @@ void OnTick()
          else if(isBearish)
          {
             double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-            double sl = NormalizeDouble(bid + (slPips * pointsPerPip * point), digits);
-            double tp = NormalizeDouble(bid - (tpPips * pointsPerPip * point), digits);
+            double slPrice = 0.0, tpPrice = 0.0, dynamicSLPips = 0.0, dynamicTPPips = 0.0;
+            CalculateDynamicSLTP(false, bid, slPrice, tpPrice, dynamicSLPips, dynamicTPPips);
+            double lot = InpUseDynamicRisk ? CalculateLotSize(_Symbol, dynamicSLPips, InpRiskPercent) : InpFixedLot;
 
             ResetLastError();
-            if(g_trade.Sell(lot, _Symbol, bid, sl, tp, InpOrderComment))
+            if(g_trade.Sell(lot, _Symbol, bid, slPrice, tpPrice, InpOrderComment))
             {
-               PrintFormat("[TG-Robot] SELL executed! Lot: %.2f | Bid: %.5f | SL: %.5f (+%.0fp) | TP: %.5f (-%.0fp) [Pure 1:2 RR - Zero BEP]",
-                           lot, bid, sl, slPips, tp, tpPips);
+               PrintFormat("[TG-Robot] SELL executed! Lot: %.2f | Bid: %.5f | SL: %.5f (+%.1fp) | TP: %.5f (-%.1fp) [Swing SL - Strict 1:%.1f RR]",
+                           lot, bid, slPrice, dynamicSLPips, tpPrice, dynamicTPPips, InpRiskRewardRatio);
                g_lastBarTime = currentBarTime;
-               signalStatus = "SELL EXECUTED (Pure 1:2 RR)";
+               signalStatus = StringFormat("SELL EXECUTED (SL %.1fp | TP %.1fp)", dynamicSLPips, dynamicTPPips);
             }
             else
             {
@@ -446,3 +534,4 @@ void OnTick()
    UpdateChartHUD(fastEMA, slowEMA, rsi, signalStatus);
 }
 //+------------------------------------------------------------------+
+
