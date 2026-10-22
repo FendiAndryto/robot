@@ -479,3 +479,149 @@ def test_user_isolated_mt5_telemetry():
     bob_pos = client.get("/api/v1/bridge/positions", headers=bob_headers).json()
     assert len(alice_pos) == 1 and alice_pos[0]["ticket"] == 5001
     assert len(bob_pos) == 1 and bob_pos[0]["ticket"] == 6001
+
+
+def test_account_switch_resets_journal_and_isolates_history():
+    bridge_service.reset_state()
+    auth_headers, bridge_token = get_auth_context()
+    now = int(time.time())
+
+    # 1. Connect Account A (login: 11111) with 2 closed trades
+    payload_a = {
+        "account_number": 11111,
+        "server": "Demo-Server-A",
+        "currency": "USD",
+        "balance": 1000.0,
+        "equity": 1050.0,
+        "terminal_connected": True,
+        "open_positions": 0,
+        "positions": [],
+        "closed_trades": [
+            {
+                "ticket": 1001,
+                "symbol": "XAUUSD",
+                "type": "BUY",
+                "volume": 0.05,
+                "open_price": 2700.0,
+                "close_price": 2710.0,
+                "profit": 50.0,
+                "open_time": now - 3600,
+                "close_time": now - 1800,
+                "magic": 778899
+            },
+            {
+                "ticket": 1002,
+                "symbol": "EURUSD",
+                "type": "SELL",
+                "volume": 0.1,
+                "open_price": 1.0850,
+                "close_price": 1.0870,
+                "profit": -20.0,
+                "open_time": now - 7200,
+                "close_time": now - 3600,
+                "magic": 0
+            }
+        ],
+        "bridge_token": bridge_token,
+        "timestamp": now
+    }
+    res = client.post("/api/v1/bridge/heartbeat", json=payload_a)
+    assert res.status_code == 200
+
+    # Verify Account A history has 2 trades
+    hist_a = client.get("/api/v1/bridge/history", headers=auth_headers).json()
+    assert hist_a["total_trades"] == 2
+    assert hist_a["net_pnl"] == 30.0
+    assert hist_a["account_number"] == 11111
+    assert hist_a["server"] == "Demo-Server-A"
+
+    # 2. Trader switches to Account B (login: 22222) which is brand new (0 closed trades)
+    payload_b_empty = {
+        "account_number": 22222,
+        "server": "Real-Server-B",
+        "currency": "USD",
+        "balance": 5000.0,
+        "equity": 5000.0,
+        "terminal_connected": True,
+        "open_positions": 0,
+        "positions": [],
+        "closed_trades": [],  # Brand new account has 0 closed trades!
+        "bridge_token": bridge_token,
+        "timestamp": now + 5
+    }
+    res_b = client.post("/api/v1/bridge/heartbeat", json=payload_b_empty)
+    assert res_b.status_code == 200
+
+    # Critical Assertion: The journal MUST RESET for the new account!
+    # It must NOT retain Account A's history!
+    hist_b = client.get("/api/v1/bridge/history", headers=auth_headers).json()
+    assert hist_b["total_trades"] == 0
+    assert hist_b["net_pnl"] == 0.0
+    assert len(hist_b["trades"]) == 0
+    assert hist_b["account_number"] == 22222
+    assert hist_b["server"] == "Real-Server-B"
+
+    # Status closed_trades_count must also be 0
+    status_b = client.get("/api/v1/bridge/status", headers=auth_headers).json()
+    assert status_b["closed_trades_count"] == 0
+    assert status_b["metrics"]["account_number"] == 22222
+
+    # Account Performance Equity Curve must be reset to Account B ($5000) with 0.0 PnL
+    curve_b = client.get("/api/v1/bridge/equity-curve?range=Month", headers=auth_headers).json()
+    assert curve_b["account_number"] == 22222
+    assert curve_b["starting_equity"] == 5000.0
+    assert curve_b["all_time_pnl"] == 0.0
+    assert curve_b["roi_percent"] == 0.0
+
+    # AutoPilot Drawdown Guard starting equity must be calibrated to Account B ($5000), not old Account A ($10000)
+    ap_b = client.get("/api/v1/autopilot/status", headers=auth_headers).json()
+    assert ap_b["starting_equity"] == 5000.0
+    assert ap_b["daily_drawdown_percent"] == 0.0
+    assert ap_b["is_drawdown_lockout_active"] is False
+
+    # 3. Account B completes a trade (ticket 2001)
+    payload_b_with_trade = {
+        "account_number": 22222,
+        "server": "Real-Server-B",
+        "currency": "USD",
+        "balance": 5100.0,
+        "equity": 5100.0,
+        "terminal_connected": True,
+        "open_positions": 0,
+        "positions": [],
+        "closed_trades": [
+            {
+                "ticket": 2001,
+                "symbol": "BTCUSD",
+                "type": "BUY",
+                "volume": 0.02,
+                "open_price": 95000.0,
+                "close_price": 96000.0,
+                "profit": 100.0,
+                "open_time": now,
+                "close_time": now + 60,
+                "magic": 778899
+            }
+        ],
+        "bridge_token": bridge_token,
+        "timestamp": now + 65
+    }
+    client.post("/api/v1/bridge/heartbeat", json=payload_b_with_trade)
+
+    hist_b2 = client.get("/api/v1/bridge/history", headers=auth_headers).json()
+    assert hist_b2["total_trades"] == 1
+    assert hist_b2["net_pnl"] == 100.0
+    assert hist_b2["trades"][0]["ticket"] == 2001
+    # Verify Account A tickets (1001, 1002) are NOT present
+    tickets_b2 = [t["ticket"] for t in hist_b2["trades"]]
+    assert 1001 not in tickets_b2
+    assert 1002 not in tickets_b2
+
+    # 4. Test manual reset endpoint /api/v1/bridge/history/reset
+    reset_res = client.post("/api/v1/bridge/history/reset", headers=auth_headers)
+    assert reset_res.status_code == 200
+    assert reset_res.json()["status"] == "success"
+
+    hist_after_reset = client.get("/api/v1/bridge/history", headers=auth_headers).json()
+    assert hist_after_reset["total_trades"] == 0
+    assert len(hist_after_reset["trades"]) == 0

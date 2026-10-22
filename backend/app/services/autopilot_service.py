@@ -68,6 +68,20 @@ class AutoPilotService:
                 st.starting_equity = equity
                 st.last_reset_date = today_str
 
+    def on_account_changed(self, username: Optional[str], current_equity: float):
+        """Reset starting equity baseline and daily tracking when switching MT5 accounts."""
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with self._lock:
+            st = self._get_state(username)
+            if current_equity > 0:
+                st.starting_equity = current_equity
+            st.closed_daily_pnl = 0.0
+            st.last_reset_date = today_str
+            # Disarm stale drawdown lockout from old account
+            st.is_drawdown_lockout_active = False
+            st.drawdown_lockout_reason = None
+            st.drawdown_lockout_time = None
+
     def ensure_active_on_connect(self, username: Optional[str] = None):
         """Automatically engage AutoPilot whenever MT5 terminal connects, provided Drawdown Guard is not locked."""
         from app.services.bridge_service import bridge_service

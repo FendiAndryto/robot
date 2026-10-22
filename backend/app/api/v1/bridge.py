@@ -75,6 +75,15 @@ async def get_trade_history(current_user: str = Depends(get_current_user)):
     return bridge_service.get_trade_history(username=current_user)
 
 
+@router.post(
+    "/history/reset",
+    status_code=status.HTTP_200_OK,
+    summary="Reset cached journal trade history and force resync with active MT5 account"
+)
+async def reset_trade_history(current_user: str = Depends(get_current_user)):
+    return bridge_service.reset_trade_history(username=current_user)
+
+
 @router.get(
     "/market",
     response_model=List[MarketQuoteItem],

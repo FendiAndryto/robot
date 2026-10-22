@@ -57,6 +57,8 @@ class TradeHistoryResponse(BaseModel):
     losing_trades: int = Field(0, description="Losing trades count")
     gross_profit: float = Field(0.0, description="Sum of positive trades")
     gross_loss: float = Field(0.0, description="Sum of negative trades")
+    account_number: Optional[int] = Field(None, description="Active MT5 Account Login Number")
+    server: Optional[str] = Field(None, description="Active Broker Server Name")
 
 
 class EquityPointItem(BaseModel):
@@ -72,6 +74,8 @@ class EquityCurveResponse(BaseModel):
     peak_equity: float = 0.0
     all_time_pnl: Optional[float] = None
     roi_percent: Optional[float] = None
+    account_number: Optional[int] = None
+    server: Optional[str] = None
     points: List[EquityPointItem] = Field(default_factory=list)
 
 

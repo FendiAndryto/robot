@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { BookOpen, Calendar, ArrowUpRight, RefreshCw, Layers } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { BookOpen, Calendar, ArrowUpRight, RefreshCw, Layers, CheckCircle2 } from 'lucide-react';
 import { api } from '../services/api';
 
 const formatCurrency = (val) => {
@@ -16,6 +16,11 @@ export default function JournalTab({ activeTab, closedTradesCount, onNavigateAI,
   const [selectedDate, setSelectedDate] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  const activeAccountNumber = bridgeStatus?.metrics?.account_number || null;
+  const activeServer = bridgeStatus?.metrics?.server || null;
+  const isConnected = bridgeStatus?.is_connected ?? false;
+  const prevAccountRef = useRef(activeAccountNumber);
+
   const initialDeposit = bridgeStatus?.initial_deposit ?? bridgeStatus?.metrics?.initial_deposit ?? null;
   const isDepositOverridden = bridgeStatus?.is_deposit_overridden ?? false;
   const equity = bridgeStatus?.metrics?.equity ?? null;
@@ -26,12 +31,14 @@ export default function JournalTab({ activeTab, closedTradesCount, onNavigateAI,
     ? bridgeStatus.all_time_pnl_percent
     : (initialDeposit > 0 && allTimePnl !== null ? (allTimePnl / initialDeposit) * 100 : null);
 
-
   const fetchHistory = async (isManual = false) => {
     if (isManual) setRefreshing(true);
     try {
       const data = await api.getTradeHistory();
-      setHistoryData(data);
+      // Ensure incoming history belongs to currently connected MT5 account
+      if (!activeAccountNumber || !data?.account_number || data.account_number === activeAccountNumber) {
+        setHistoryData(data);
+      }
     } catch (err) {
       console.error('Failed to load trade history:', err);
     } finally {
@@ -40,7 +47,17 @@ export default function JournalTab({ activeTab, closedTradesCount, onNavigateAI,
     }
   };
 
-  // Immediate reactive fetch when Journal tab becomes active OR when new closed trade arrives
+  // 100% Automatic Sync: Immediately wipe previous account history when switching MT5 account
+  useEffect(() => {
+    if (activeAccountNumber && prevAccountRef.current && prevAccountRef.current !== activeAccountNumber) {
+      setHistoryData(null);
+      setLoading(true);
+      fetchHistory();
+    }
+    prevAccountRef.current = activeAccountNumber;
+  }, [activeAccountNumber]);
+
+  // Immediate reactive fetch when Journal tab becomes active or closed trades change
   useEffect(() => {
     if (activeTab === 'journal' || !activeTab) {
       fetchHistory();
@@ -54,7 +71,7 @@ export default function JournalTab({ activeTab, closedTradesCount, onNavigateAI,
       fetchHistory();
     }, 4000);
     return () => clearInterval(timer);
-  }, [activeTab]);
+  }, [activeTab, activeAccountNumber]);
 
   const handleRefresh = () => {
     fetchHistory(true);
@@ -131,18 +148,89 @@ export default function JournalTab({ activeTab, closedTradesCount, onNavigateAI,
         <div>
           <div className="eyebrow">MT5 REAL TRADING JOURNAL</div>
           <h1>Trading Journal</h1>
-          <div className="sub">Riwayat transaksi objektif tersinkronisasi langsung dari akun MetaTrader 5.</div>
+          <div className="sub" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span>Riwayat transaksi objektif tersinkronisasi langsung dari akun MetaTrader 5.</span>
+            {activeAccountNumber ? (
+              <span
+                style={{
+                  background: isConnected ? 'rgba(7, 188, 12, 0.12)' : 'rgba(235, 87, 87, 0.12)',
+                  color: isConnected ? 'var(--g)' : 'var(--red)',
+                  border: `1px solid ${isConnected ? 'rgba(7, 188, 12, 0.3)' : 'rgba(235, 87, 87, 0.3)'}`,
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px'
+                }}
+                id="journal-active-account-badge"
+              >
+                <span
+                  style={{
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    background: isConnected ? 'var(--g)' : 'var(--red)',
+                    display: 'inline-block'
+                  }}
+                />
+                Akun #{activeAccountNumber} {activeServer ? `(${activeServer})` : ''}
+              </span>
+            ) : (
+              <span
+                style={{
+                  background: 'rgba(255, 184, 0, 0.12)',
+                  color: '#ffb800',
+                  border: '1px solid rgba(255, 184, 0, 0.3)',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: 600
+                }}
+                id="journal-standby-badge"
+              >
+                MT5 Standby (Belum Terhubung)
+              </span>
+            )}
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 10px',
+              borderRadius: '8px',
+              background: '#0a1419',
+              border: '1px solid var(--line)',
+              fontSize: '11px',
+              color: 'var(--muted)'
+            }}
+            id="journal-autosync-indicator"
+          >
+            <span
+              style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: isConnected ? '#45e0ad' : '#ff5b6b',
+                boxShadow: isConnected ? '0 0 8px #45e0ad' : 'none'
+              }}
+            />
+            <span style={{ color: '#c9d8dc', fontWeight: 600 }}>Otomatis Sinkron</span>
+          </div>
           <button
             type="button"
             className="btn alt"
             onClick={handleRefresh}
-            title="Refresh Riwayat MT5"
+            title="Refresh dan Sinkronkan Riwayat MT5"
             id="journal-refresh-btn"
-            style={{ padding: '8px 12px' }}
+            style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}
           >
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+            <span className="desktop-only-inline">Refresh</span>
           </button>
           <button
             type="button"
@@ -307,10 +395,16 @@ export default function JournalTab({ activeTab, closedTradesCount, onNavigateAI,
                   <td colSpan={8} style={{ padding: '36px 8px', textAlign: 'center', color: 'var(--muted)' }}>
                     <Layers size={28} style={{ margin: '0 auto 10px', opacity: 0.4 }} />
                     <div style={{ fontWeight: 600, fontSize: '13px', color: '#c9d8dc' }}>
-                      {loading ? 'Memuat riwayat transaksi dari MT5...' : 'Belum Ada Transaksi Tertutup'}
+                      {loading
+                        ? 'Memuat riwayat transaksi dari MT5...'
+                        : activeAccountNumber
+                        ? `Belum Ada Transaksi Tertutup di Akun #${activeAccountNumber}`
+                        : 'Belum Ada Transaksi Tertutup'}
                     </div>
                     <div style={{ fontSize: '11px', marginTop: '4px' }}>
-                      Transaksi yang dieksekusi dan ditutup pada MetaTrader 5 akan otomatis tersinkronisasi di sini secara real-time.
+                      {activeAccountNumber
+                        ? `Akun MT5 #${activeAccountNumber} aktif terhubung. Transaksi deals tertutup dari akun ini akan otomatis tercatat di sini.`
+                        : 'Transaksi yang dieksekusi dan ditutup pada MetaTrader 5 akan otomatis tersinkronisasi di sini secara real-time.'}
                     </div>
                   </td>
                 </tr>

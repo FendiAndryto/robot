@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   DollarSign,
   Activity,
@@ -50,6 +50,10 @@ export default function HomeTab({
   const floatingPnl = positions.length > 0 ? calculatedFloatingPnl : (metrics.floating_pnl ?? 0);
   const marketQuotes = bridgeStatus?.market_quotes || [];
 
+  // Active account number tracking for instant automatic synchronization
+  const currentAccountNumber = metrics.account_number || null;
+  const prevAccountNumberRef = useRef(currentAccountNumber);
+
   // Initial Balance Benchmark & All-Time Performance Calculations
   const initialDeposit = bridgeStatus?.initial_deposit ?? metrics.initial_deposit ?? balance;
   const isDepositOverridden = bridgeStatus?.is_deposit_overridden ?? false;
@@ -66,6 +70,16 @@ export default function HomeTab({
     ? bridgeStatus.all_time_pnl_percent
     : (initialDeposit > 0 ? ((equity - initialDeposit) / initialDeposit) * 100 : 0);
 
+  // 100% Automatic Sync: Immediately clear old account curve and history when MT5 account switches
+  useEffect(() => {
+    if (currentAccountNumber && prevAccountNumberRef.current && prevAccountNumberRef.current !== currentAccountNumber) {
+      setEquityCurveData(null);
+      setHistoryData(null);
+    }
+    prevAccountNumberRef.current = currentAccountNumber;
+  }, [currentAccountNumber]);
+
+  // Reactive automatic data fetch for active account
   useEffect(() => {
     let isMounted = true;
     const fetchData = async () => {
@@ -75,17 +89,34 @@ export default function HomeTab({
           api.getTradeHistory().catch(() => null)
         ]);
         if (!isMounted) return;
-        if (curve) setEquityCurveData(curve);
-        if (history) setHistoryData(history);
+        // Verify account number to prevent race conditions or cross-account data bleeding
+        if (curve) {
+          if (!currentAccountNumber || !curve.account_number || curve.account_number === currentAccountNumber) {
+            setEquityCurveData(curve);
+          }
+        }
+        if (history) {
+          if (!currentAccountNumber || !history.account_number || history.account_number === currentAccountNumber) {
+            setHistoryData(history);
+          }
+        }
       } catch {
         // Ignore transient error
       }
     };
+
     fetchData();
+
+    // Auto-sync polling every 5s to keep performance curve up to date
+    const syncInterval = setInterval(() => {
+      if (isMounted) fetchData();
+    }, 5000);
+
     return () => {
       isMounted = false;
+      clearInterval(syncInterval);
     };
-  }, [bridgeStatus, chartRange]);
+  }, [currentAccountNumber, chartRange, bridgeStatus?.closed_trades_count]);
 
   const handleSaveInitialDeposit = async () => {
     const num = parseFloat(depositInput);
@@ -354,11 +385,16 @@ export default function HomeTab({
           </div>
 
           {(() => {
-            const points = equityCurveData?.points || [];
+            const isCurveActive = Boolean(
+              equityCurveData &&
+              (!currentAccountNumber || !equityCurveData.account_number || equityCurveData.account_number === currentAccountNumber)
+            );
+            const activeCurve = isCurveActive ? equityCurveData : null;
+            const points = activeCurve?.points || [];
             let pathD = '';
             let areaD = '';
 
-            const isNetPositive = (equityCurveData?.current_equity ?? equity) >= (equityCurveData?.starting_equity ?? equity);
+            const isNetPositive = (activeCurve?.current_equity ?? equity) >= (activeCurve?.starting_equity ?? balance);
             const strokeColor = isNetPositive ? '#45e0ad' : '#ff5b6b';
             const gradientId = isNetPositive ? 'tradegear-area-pos' : 'tradegear-area-neg';
 
@@ -384,33 +420,35 @@ export default function HomeTab({
             }
 
             return (
-              <svg className="chart" viewBox="0 0 600 180" preserveAspectRatio="none" style={{ width: '100%', height: '175px', display: 'block', margin: '4px 0' }}>
-                <defs>
-                  <linearGradient id="tradegear-area-pos" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0" stopColor="#45e0ad" stopOpacity="0.30" />
-                    <stop offset="1" stopColor="#45e0ad" stopOpacity="0" />
-                  </linearGradient>
-                  <linearGradient id="tradegear-area-neg" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0" stopColor="#ff5b6b" stopOpacity="0.30" />
-                    <stop offset="1" stopColor="#ff5b6b" stopOpacity="0" />
-                  </linearGradient>
-                </defs>
-                <g stroke="#1e343d" strokeDasharray="4 7">
-                  <path d="M0 35H600M0 75H600M0 115H600M0 155H600" />
-                </g>
-                <path d={areaD} fill={`url(#${gradientId})`} />
-                <path d={pathD} fill="none" stroke={strokeColor} strokeWidth="2.5" strokeLinecap="round" />
-              </svg>
+              <>
+                <svg className="chart" viewBox="0 0 600 180" preserveAspectRatio="none" style={{ width: '100%', height: '175px', display: 'block', margin: '4px 0' }}>
+                  <defs>
+                    <linearGradient id="tradegear-area-pos" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stopColor="#45e0ad" stopOpacity="0.30" />
+                      <stop offset="1" stopColor="#45e0ad" stopOpacity="0" />
+                    </linearGradient>
+                    <linearGradient id="tradegear-area-neg" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stopColor="#ff5b6b" stopOpacity="0.30" />
+                      <stop offset="1" stopColor="#ff5b6b" stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+                  <g stroke="#1e343d" strokeDasharray="4 7">
+                    <path d="M0 35H600M0 75H600M0 115H600M0 155H600" />
+                  </g>
+                  <path d={areaD} fill={`url(#${gradientId})`} />
+                  <path d={pathD} fill="none" stroke={strokeColor} strokeWidth="2.5" strokeLinecap="round" />
+                </svg>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)', fontSize: '9.5px', marginTop: '6px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '6px' }}>
+                  <span>Awal {chartRange}: {formatCurrency(activeCurve?.starting_equity ?? balance, currency)}</span>
+                  <span>Equity Riil: {formatCurrency(equity, currency)}</span>
+                  <span style={{ fontWeight: 700, color: (activeCurve?.all_time_pnl ?? allTimePnl) >= 0 ? 'var(--g)' : 'var(--red)' }}>
+                    Net: {(activeCurve?.all_time_pnl ?? allTimePnl) >= 0 ? '+' : ''}{formatCurrency(activeCurve?.all_time_pnl ?? allTimePnl, currency)}
+                  </span>
+                </div>
+              </>
             );
           })()}
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)', fontSize: '9.5px', marginTop: '6px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '6px' }}>
-            <span>Awal {chartRange}: {formatCurrency(equityCurveData?.starting_equity ?? balance, currency)}</span>
-            <span>Equity Riil: {formatCurrency(equity, currency)}</span>
-            <span style={{ fontWeight: 700, color: (equityCurveData?.all_time_pnl ?? allTimePnl) >= 0 ? 'var(--g)' : 'var(--red)' }}>
-              Net: {(equityCurveData?.all_time_pnl ?? allTimePnl) >= 0 ? '+' : ''}{formatCurrency(equityCurveData?.all_time_pnl ?? allTimePnl, currency)}
-            </span>
-          </div>
         </div>
 
         {/* Active Trades Card (Kolom Kanan) - Langsung terlihat tanpa scroll */}
@@ -532,53 +570,63 @@ export default function HomeTab({
       <div className="section" style={{ fontSize: '14px', fontWeight: 800, marginBottom: '10px' }}>
         Performance Snapshot
       </div>
-      <div className="grid three">
-        <div className="card">
-          <div className="metric">
-            {historyData && historyData.total_trades > 0
-              ? `${historyData.win_rate.toFixed(1)}%`
-              : '0.0%'}
+      {(() => {
+        const isHistoryActive = Boolean(
+          historyData &&
+          (!currentAccountNumber || !historyData.account_number || historyData.account_number === currentAccountNumber)
+        );
+        const activeHistory = isHistoryActive ? historyData : null;
+
+        return (
+          <div className="grid three">
+            <div className="card">
+              <div className="metric">
+                {activeHistory && activeHistory.total_trades > 0
+                  ? `${activeHistory.win_rate.toFixed(1)}%`
+                  : '0.0%'}
+              </div>
+              <div className="label">Win Rate</div>
+              <div className="tiny">
+                {activeHistory && activeHistory.total_trades > 0
+                  ? `${activeHistory.total_trades} trades (${activeHistory.winning_trades}W / ${activeHistory.losing_trades}L)`
+                  : 'Belum ada trade'}
+              </div>
+            </div>
+            <div className="card">
+              <div className="metric">
+                {activeHistory && activeHistory.total_trades > 0
+                  ? (activeHistory.profit_factor > 0 ? activeHistory.profit_factor.toFixed(2) : (activeHistory.gross_loss === 0 ? '∞' : '0.00'))
+                  : '0.00'}
+              </div>
+              <div className="label">Profit Factor</div>
+              <div className="tiny">
+                {activeHistory && activeHistory.total_trades > 0
+                  ? `Gross: +$${activeHistory.gross_profit?.toFixed(2) ?? '0.00'} / -$${activeHistory.gross_loss?.toFixed(2) ?? '0.00'}`
+                  : 'Gross PnL ratio'}
+              </div>
+            </div>
+            <div className="card">
+              {(() => {
+                const ddPct = autopilotStatus?.daily_drawdown_percent ?? (
+                  balance > 0 && equity < balance ? ((balance - equity) / balance) * 100 : 0
+                );
+                const isNegative = ddPct > 0;
+                return (
+                  <>
+                    <div className={`metric ${isNegative ? 'negative' : ''}`}>
+                      {isNegative ? `−${ddPct.toFixed(2)}%` : '0.0%'}
+                    </div>
+                    <div className="label">Daily Drawdown</div>
+                    <div className="tiny">
+                      Guard limit: {autopilotStatus?.max_daily_drawdown_percent ?? 3.0}% max buffer
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
           </div>
-          <div className="label">Win Rate</div>
-          <div className="tiny">
-            {historyData && historyData.total_trades > 0
-              ? `${historyData.total_trades} trades (${historyData.winning_trades}W / ${historyData.losing_trades}L)`
-              : 'No closed trades yet'}
-          </div>
-        </div>
-        <div className="card">
-          <div className="metric">
-            {historyData && historyData.total_trades > 0
-              ? (historyData.profit_factor > 0 ? historyData.profit_factor.toFixed(2) : (historyData.gross_loss === 0 ? '∞' : '0.00'))
-              : '0.00'}
-          </div>
-          <div className="label">Profit Factor</div>
-          <div className="tiny">
-            {historyData && historyData.total_trades > 0
-              ? `Gross: +$${historyData.gross_profit?.toFixed(2) ?? '0.00'} / -$${historyData.gross_loss?.toFixed(2) ?? '0.00'}`
-              : 'Gross PnL ratio'}
-          </div>
-        </div>
-        <div className="card">
-          {(() => {
-            const ddPct = autopilotStatus?.daily_drawdown_percent ?? (
-              balance > 0 && equity < balance ? ((balance - equity) / balance) * 100 : 0
-            );
-            const isNegative = ddPct > 0;
-            return (
-              <>
-                <div className={`metric ${isNegative ? 'negative' : ''}`}>
-                  {isNegative ? `−${ddPct.toFixed(2)}%` : '0.0%'}
-                </div>
-                <div className="label">Daily Drawdown</div>
-                <div className="tiny">
-                  Guard limit: {autopilotStatus?.max_daily_drawdown_percent ?? 3.0}% max buffer
-                </div>
-              </>
-            );
-          })()}
-        </div>
-      </div>
+        );
+      })()}
 
       {/* Modal Quick-Edit Initial Deposit */}
       {isDepositModalOpen && (

@@ -29,6 +29,8 @@ from app.services.user_service import user_service
 class UserBridgeSession:
     def __init__(self, username: str):
         self.username = username
+        self.account_number: Optional[int] = None
+        self.server: Optional[str] = None
         self.latest_payload: Optional[HeartbeatPayload] = None
         self.last_received_time: Optional[float] = None
         self.pending_commands: List[CommandItem] = []
@@ -39,17 +41,26 @@ class UserBridgeSession:
         self.previous_positions_map: dict = {}
         self.previous_balance: Optional[float] = None
         self.market_quotes: Dict[str, MarketQuoteItem] = {}
+        self.account_trades: Dict[int, Dict[int, ClosedTradeItem]] = {}
+        self.account_initial_deposits: Dict[int, float] = {}
+        self.account_custom_deposits: Dict[int, Optional[float]] = {}
         self.closed_trades_map: Dict[int, ClosedTradeItem] = {}
         self.equity_snapshots: List[dict] = []
         self.chart_symbol: Optional[str] = None
         self.mt5_initial_deposit: Optional[float] = None
-        self.custom_initial_deposit: Optional[float] = user_service.get_custom_initial_deposit(username)
+        self.custom_initial_deposit: Optional[float] = None
 
-    def get_effective_initial_deposit(self) -> Optional[float]:
-        if self.custom_initial_deposit is not None and self.custom_initial_deposit > 0:
-            return self.custom_initial_deposit
-        if self.mt5_initial_deposit is not None and self.mt5_initial_deposit > 0:
-            return self.mt5_initial_deposit
+    def get_effective_initial_deposit(self, account_number: Optional[int] = None) -> Optional[float]:
+        acct = account_number or self.account_number
+        if acct:
+            custom = self.account_custom_deposits.get(acct)
+            if custom is not None and custom > 0:
+                return custom
+            mt5_dep = self.account_initial_deposits.get(acct)
+            if mt5_dep is not None and mt5_dep > 0:
+                return mt5_dep
+
+        # Fallback to current session payload balance
         if self.latest_payload and self.latest_payload.balance > 0:
             return self.latest_payload.balance
         return None
@@ -165,18 +176,49 @@ class BridgeService:
         with self._lock:
             session = self._get_or_create_session(username)
 
+            # Determine whether MT5 account has changed
+            acct = payload.account_number
+            account_changed = False
+            if session.account_number is not None and acct != session.account_number:
+                account_changed = True
+            elif session.latest_payload is not None and acct != session.latest_payload.account_number:
+                account_changed = True
+
+            if account_changed:
+                # MT5 Account has switched! Reset previous account's telemetry
+                session.previous_positions_map.clear()
+                session.equity_snapshots.clear()
+                session.account_trades[acct] = {}
+                session.closed_trades_map = session.account_trades[acct]
+                session.previous_balance = payload.balance
+                # Ensure custom initial deposit is isolated and does not leak from previous account
+                session.custom_initial_deposit = session.account_custom_deposits.get(acct)
+
+            session.account_number = acct
+            session.server = payload.server
+
+            # Ensure active account trades map exists and closed_trades_map points to it
+            if session.account_number not in session.account_trades:
+                session.account_trades[session.account_number] = {}
+            session.closed_trades_map = session.account_trades[session.account_number]
+
             # Update market quotes
             if payload.market_quotes:
                 for q in payload.market_quotes:
                     session.market_quotes[q.symbol.upper()] = q
 
-            # Update closed trades from MT5 history
-            if payload.closed_trades:
+            # Update closed trades from MT5 history for this account
+            if payload.closed_trades is not None:
+                session.closed_trades_map.clear()
                 for t in payload.closed_trades:
                     session.closed_trades_map[t.ticket] = t
 
+            # Record initial deposit for this specific account
             if payload.initial_deposit and payload.initial_deposit > 0:
-                session.mt5_initial_deposit = payload.initial_deposit
+                session.account_initial_deposits[acct] = payload.initial_deposit
+            elif acct not in session.account_initial_deposits or session.account_initial_deposits[acct] <= 0:
+                session.account_initial_deposits[acct] = payload.balance
+            session.mt5_initial_deposit = session.account_initial_deposits.get(acct)
 
             if payload.chart_symbol:
                 session.chart_symbol = payload.chart_symbol.strip()
@@ -191,9 +233,9 @@ class BridgeService:
                 if len(session.equity_snapshots) > 500:
                     session.equity_snapshots.pop(0)
 
-            # Detect closed positions
+            # Detect closed positions (only if account did not switch to avoid false alerts)
             current_tickets = {pos.ticket for pos in payload.positions}
-            if session.previous_positions_map:
+            if session.previous_positions_map and not account_changed:
                 for old_ticket, old_pos in session.previous_positions_map.items():
                     if old_ticket not in current_tickets:
                         closed_positions.append(old_pos)
@@ -203,9 +245,11 @@ class BridgeService:
             session.latest_payload = payload
             session.last_received_time = current_time
 
-        # Engage AutoPilot for this user
+        # Engage AutoPilot and calibrate drawdown baseline for this user/account
         try:
             from app.services.autopilot_service import autopilot_service
+            if account_changed:
+                autopilot_service.on_account_changed(username=username, current_equity=payload.equity)
             autopilot_service.ensure_active_on_connect(username=username)
         except Exception:
             pass
@@ -301,17 +345,48 @@ class BridgeService:
             session = self._get_or_create_session(username)
             return list(session.market_quotes.values())
 
+    def reset_trade_history(self, username: Optional[str] = None) -> dict:
+        with self._lock:
+            session = self._get_or_create_session(username)
+            if session.account_number and session.account_number in session.account_trades:
+                session.account_trades[session.account_number].clear()
+            session.closed_trades_map.clear()
+            session.equity_snapshots.clear()
+            acct = session.account_number
+        return {
+            "status": "success",
+            "message": "Riwayat jurnal berhasil di-reset dan disinkronkan ulang dengan akun MT5 aktif.",
+            "account_number": acct
+        }
+
     def get_trade_history(self, username: Optional[str] = None) -> TradeHistoryResponse:
         with self._lock:
             session = self._get_or_create_session(username)
+            acct = session.account_number
+            active_trades_map = session.account_trades.get(acct) if acct else {}
+            if active_trades_map is None:
+                active_trades_map = {}
+
             trades = sorted(
-                list(session.closed_trades_map.values()),
+                list(active_trades_map.values()),
                 key=lambda x: x.close_time or 0,
                 reverse=True
             )
             total = len(trades)
             if total == 0:
-                return TradeHistoryResponse()
+                return TradeHistoryResponse(
+                    trades=[],
+                    net_pnl=0.0,
+                    win_rate=0.0,
+                    profit_factor=0.0,
+                    total_trades=0,
+                    winning_trades=0,
+                    losing_trades=0,
+                    gross_profit=0.0,
+                    gross_loss=0.0,
+                    account_number=acct,
+                    server=session.server
+                )
 
             profits = [t.profit for t in trades]
             net_pnl = round(sum(profits), 2)
@@ -332,13 +407,16 @@ class BridgeService:
                 winning_trades=wins,
                 losing_trades=losses,
                 gross_profit=gross_profit,
-                gross_loss=gross_loss
+                gross_loss=gross_loss,
+                account_number=acct,
+                server=session.server
             )
 
     def get_initial_deposit_info(self, username: Optional[str] = None) -> dict:
         with self._lock:
             session = self._get_or_create_session(username)
-            eff_deposit = session.get_effective_initial_deposit()
+            acct = session.account_number
+            eff_deposit = session.get_effective_initial_deposit(acct)
             bal = session.latest_payload.balance if session.latest_payload else (eff_deposit or 0.0)
             eq = session.latest_payload.equity if session.latest_payload else (eff_deposit or 0.0)
             settled_pnl = round(bal - eff_deposit, 2) if eff_deposit else 0.0
@@ -346,16 +424,20 @@ class BridgeService:
             all_time_pnl = round(eq - eff_deposit, 2) if eff_deposit else 0.0
             all_time_pnl_pct = round((all_time_pnl / eff_deposit) * 100.0, 2) if eff_deposit else 0.0
 
-            source = "override" if session.custom_initial_deposit is not None else ("mt5" if session.mt5_initial_deposit else "default")
+            custom_override = session.account_custom_deposits.get(acct) if acct else None
+            is_overridden = custom_override is not None and custom_override > 0
+            mt5_dep = session.account_initial_deposits.get(acct) if acct else None
+            source = "override" if is_overridden else ("mt5" if mt5_dep else "balance")
             return {
                 "status": "success",
                 "initial_deposit": eff_deposit,
-                "is_overridden": session.custom_initial_deposit is not None,
+                "is_overridden": is_overridden,
                 "source": source,
                 "settled_pnl": settled_pnl,
                 "settled_pnl_percent": settled_pnl_pct,
                 "all_time_pnl": all_time_pnl,
                 "all_time_pnl_percent": all_time_pnl_pct,
+                "account_number": acct,
                 "message": "Initial deposit retrieved successfully."
             }
 
@@ -363,10 +445,16 @@ class BridgeService:
         user_key = self._normalize_user(username)
         with self._lock:
             session = self._get_or_create_session(user_key)
+            acct = session.account_number
             if initial_deposit is not None and float(initial_deposit) > 0:
-                session.custom_initial_deposit = round(float(initial_deposit), 2)
+                val = round(float(initial_deposit), 2)
+                session.custom_initial_deposit = val
+                if acct:
+                    session.account_custom_deposits[acct] = val
             else:
                 session.custom_initial_deposit = None
+                if acct:
+                    session.account_custom_deposits.pop(acct, None)
 
         user_service.set_custom_initial_deposit(user_key, session.custom_initial_deposit)
         return self.get_initial_deposit_info(username=user_key)
@@ -377,9 +465,10 @@ class BridgeService:
 
         with self._lock:
             session = self._get_or_create_session(username)
+            acct = session.account_number
             cur_bal = session.latest_payload.balance if session.latest_payload else 0.0
             cur_eq = session.latest_payload.equity if session.latest_payload else cur_bal
-            eff_deposit = session.get_effective_initial_deposit() or cur_bal
+            eff_deposit = session.get_effective_initial_deposit(acct) or cur_bal
 
             if rng in ("DAY", "1D", "D"):
                 now_utc = datetime.now(timezone.utc)
@@ -391,8 +480,12 @@ class BridgeService:
             else:
                 start_ts = 0
 
+            active_trades_map = session.account_trades.get(acct) if acct else {}
+            if active_trades_map is None:
+                active_trades_map = {}
+
             trades_in_window = [
-                t for t in session.closed_trades_map.values()
+                t for t in active_trades_map.values()
                 if (t.close_time or 0) >= start_ts
             ]
             trades_in_window.sort(key=lambda x: x.close_time or 0)
@@ -403,7 +496,7 @@ class BridgeService:
                 starting_bal_window = eff_deposit
 
             points: List[EquityPointItem] = []
-            p0_time = start_ts if start_ts > 0 else (trades_in_window[0].close_time if trades_in_window else int(current_time))
+            p0_time = start_ts if start_ts > 0 else (trades_in_window[0].close_time if trades_in_window else int(current_time - 3600))
             points.append(EquityPointItem(
                 timestamp=p0_time,
                 balance=starting_bal_window,
@@ -439,6 +532,8 @@ class BridgeService:
                 peak_equity=peak_eq,
                 all_time_pnl=all_time_pnl,
                 roi_percent=roi_percent,
+                account_number=acct,
+                server=session.server,
                 points=points
             )
 
@@ -446,10 +541,15 @@ class BridgeService:
         current_time = time.time()
         with self._lock:
             session = self._get_or_create_session(username)
+            acct = session.account_number
             pending_count = len(session.pending_commands)
-            eff_deposit = session.get_effective_initial_deposit()
-            is_overridden = (session.custom_initial_deposit is not None and session.custom_initial_deposit > 0)
+            eff_deposit = session.get_effective_initial_deposit(acct)
+            custom_override = session.account_custom_deposits.get(acct) if acct else None
+            is_overridden = custom_override is not None and custom_override > 0
             
+            active_trades_map = session.account_trades.get(acct) if acct else {}
+            closed_trades_count = len(active_trades_map) if active_trades_map is not None else 0
+
             if session.last_received_time is None or session.latest_payload is None:
                 return BridgeStatusResponse(
                     is_connected=False,
@@ -466,7 +566,7 @@ class BridgeService:
                     positions=[],
                     market_quotes=list(session.market_quotes.values()),
                     chart_symbol=session.chart_symbol,
-                    closed_trades_count=len(session.closed_trades_map),
+                    closed_trades_count=closed_trades_count,
                     pending_commands_count=pending_count,
                     is_kill_switch_active=session.is_kill_switch_active,
                     kill_switch_reason=session.kill_switch_reason,
@@ -499,7 +599,7 @@ class BridgeService:
                 positions=positions,
                 market_quotes=list(session.market_quotes.values()),
                 chart_symbol=session.chart_symbol,
-                closed_trades_count=len(session.closed_trades_map),
+                closed_trades_count=closed_trades_count,
                 pending_commands_count=pending_count,
                 is_kill_switch_active=session.is_kill_switch_active,
                 kill_switch_reason=session.kill_switch_reason,

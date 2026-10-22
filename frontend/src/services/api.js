@@ -185,6 +185,16 @@ export const api = {
     return res.json();
   },
 
+  async resetTradeHistory() {
+    const res = await authFetch(`${API_BASE}/api/v1/bridge/history/reset`, {
+      method: 'POST'
+    });
+    if (!res.ok) {
+      throw new Error('Failed to reset trade history');
+    }
+    return res.json();
+  },
+
   async getEquityCurve(range = '1M') {
     const res = await authFetch(`${API_BASE}/api/v1/bridge/equity-curve?range=${encodeURIComponent(range)}`, {
       method: 'GET'

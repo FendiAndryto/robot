@@ -13,7 +13,7 @@ input group "--- TradeGear SaaS Telemetry Settings ---"
 input string InpBackendUrl        = "https://staging-trade-gear.homever.my.id"; // Backend API URL
 input string InpBridgeToken       = "";                                        // TradeGear Bridge Token (from Web Profile/Connect modal)
 input string InpMonitoredSymbols  = "XAUUSD,EURUSD,GBPUSD,USDJPY,BTCUSD";      // Watchlist symbols (comma-separated)
-input int    InpHistoryDays       = 30;                                        // History lookback days
+input int    InpHistoryDays       = 90;                                        // History lookback days (0 = All History)
 input int    InpHeartbeatInterval = 1;                                         // Heartbeat interval in seconds
 input bool   InpVerboseLog        = false;                                     // Print detailed logs to Experts tab
 
@@ -181,14 +181,14 @@ double GetAccountInitialDeposit()
 //+------------------------------------------------------------------+
 string BuildClosedTradesJson()
 {
-   datetime fromTime = TimeCurrent() - InpHistoryDays * 86400;
+   datetime fromTime = (InpHistoryDays > 0 ? (TimeCurrent() - InpHistoryDays * 86400) : 0);
 
    HistorySelect(fromTime, TimeCurrent());
    int totalDeals = HistoryDealsTotal();
 
    string json = "[";
    int count = 0;
-   int maxRecords = 50;
+   int maxRecords = 100;
 
    for(int i = totalDeals - 1; i >= 0 && count < maxRecords; i--)
    {
@@ -362,7 +362,10 @@ string BuildHeartbeatJson()
    if(!MathIsValidNumber(profit)) profit = 0.0;
 
    double initial_deposit = GetAccountInitialDeposit();
-   if(!MathIsValidNumber(initial_deposit)) initial_deposit = 0.0;
+   if(!MathIsValidNumber(initial_deposit) || initial_deposit <= 0.0)
+   {
+      initial_deposit = balance;
+   }
 
    bool connected = (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
    int positions = PositionsTotal();
